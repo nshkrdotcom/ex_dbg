@@ -28,20 +28,34 @@ defmodule ElixirScope.MessageInterceptor do
   def init(opts) do
     tracing_level = Keyword.get(opts, :tracing_level, :full)
     
-    # Set up message tracing using :dbg
-    :dbg.tracer(:process, {fn msg, _ -> send(self(), {:trace_msg, msg}) end, []})
+    # Make sure to stop any existing trace
+    try do
+      :dbg.stop()
+    catch
+      _, _ -> :ok
+    end
     
-    # Start with tracing disabled to avoid performance issues
-    # We'll enable it if configuration says so
-    :dbg.stop_clear()
+    # Set up message tracing using :dbg
+    try do
+      :dbg.tracer(:process, {fn msg, _ -> send(self(), {:trace_msg, msg}) end, []})
+    catch
+      _, _ -> :ok
+    end
     
     # Determine if tracing should be enabled based on tracing_level
     enabled = tracing_level in [:full, :messages_only]
     
     # Enable tracing if needed
     if enabled do
-      :dbg.p(:all, [:send, :receive])
+      try do
+        :dbg.p(:all, [:send, :receive])
+      catch
+        _, _ -> :ok
+      end
     end
+    
+    # Make this process trap exits so it can cleanup properly
+    Process.flag(:trap_exit, true)
     
     {:ok, %{
       enabled: enabled,
@@ -96,8 +110,15 @@ defmodule ElixirScope.MessageInterceptor do
   
   def handle_call(:enable_tracing, _from, state) do
     if not state.enabled do
-      :dbg.tracer(:process, {fn msg, _ -> send(self(), {:trace_msg, msg}) end, []})
-      :dbg.p(:all, [:send, :receive])
+      try do
+        # Set up the tracer first
+        :dbg.tracer(:process, {fn msg, _ -> send(self(), {:trace_msg, msg}) end, []})
+        # Then start tracing processes
+        :dbg.p(:all, [:send, :receive])
+      catch
+        kind, error ->
+          IO.puts("Failed to enable tracing: #{inspect({kind, error})}")
+      end
     end
     
     {:reply, :ok, %{state | enabled: true}}
@@ -105,7 +126,13 @@ defmodule ElixirScope.MessageInterceptor do
   
   def handle_call(:disable_tracing, _from, state) do
     if state.enabled do
-      :dbg.stop_clear()
+      try do
+        # Stop tracing properly
+        :dbg.stop()
+      catch
+        kind, error ->
+          IO.puts("Failed to disable tracing: #{inspect({kind, error})}")
+      end
     end
     
     {:reply, :ok, %{state | enabled: false}}
@@ -121,8 +148,21 @@ defmodule ElixirScope.MessageInterceptor do
   
   def handle_call({:trace_process, pid}, _from, state) do
     # Enable tracing for a specific process
-    :dbg.tracer(:process, {fn msg, _ -> send(self(), {:trace_msg, msg}) end, []})
-    :dbg.p(pid, [:send, :receive])
+    try do
+      # Stop any existing tracing first
+      :dbg.stop()
+      # Set up new tracer
+      :dbg.tracer(:process, {fn msg, _ -> send(self(), {:trace_msg, msg}) end, []})
+      # Trace only this specific process with both send and receive operations
+      # Ensure we're capturing both send and receive
+      :dbg.p(pid, [:send, :receive])
+      
+      # Log that we're tracing this process to aid debugging
+      IO.puts("Started tracing process #{inspect(pid)}")
+    catch
+      kind, error ->
+        IO.puts("Failed to trace process #{inspect(pid)}: #{inspect({kind, error})}")
+    end
     
     {:reply, :ok, %{state | enabled: true}}
   end
@@ -135,13 +175,23 @@ defmodule ElixirScope.MessageInterceptor do
     cond do
       # Need to enable
       should_be_enabled and not state.enabled ->
-        :dbg.tracer(:process, {fn msg, _ -> send(self(), {:trace_msg, msg}) end, []})
-        :dbg.p(:all, [:send, :receive])
+        try do
+          :dbg.tracer(:process, {fn msg, _ -> send(self(), {:trace_msg, msg}) end, []})
+          :dbg.p(:all, [:send, :receive])
+        catch
+          kind, error ->
+            IO.puts("Failed to set tracing level: #{inspect({kind, error})}")
+        end
         {:reply, :ok, %{new_state | enabled: true}}
         
       # Need to disable
       not should_be_enabled and state.enabled ->
-        :dbg.stop_clear()
+        try do
+          :dbg.stop()
+        catch
+          kind, error ->
+            IO.puts("Failed to disable tracing: #{inspect({kind, error})}")
+        end
         {:reply, :ok, %{new_state | enabled: false}}
         
       # No change needed
@@ -154,16 +204,22 @@ defmodule ElixirScope.MessageInterceptor do
     # Skip this message if tracing level is not appropriate
     if state.tracing_level in [:full, :messages_only] do
       # Record send message events
-      TraceDB.store_event(:message, %{
-        id: System.unique_integer([:positive, :monotonic]),
-        timestamp: System.monotonic_time(),
-        from_pid: from_pid,
-        to_pid: to_pid,
-        message: maybe_sanitize_message(msg, state.tracing_level),
-        type: :send
-      })
-      
-      {:noreply, %{state | message_count: state.message_count + 1}}
+      try do
+        TraceDB.store_event(:message, %{
+          id: System.unique_integer([:positive, :monotonic]),
+          timestamp: System.monotonic_time(),
+          from_pid: from_pid,
+          to_pid: to_pid,
+          message: maybe_sanitize_message(msg, state.tracing_level),
+          type: :send
+        })
+        
+        {:noreply, %{state | message_count: state.message_count + 1}}
+      catch
+        _, _ ->
+          # If we fail to store, just continue
+          {:noreply, state}
+      end
     else
       {:noreply, state}
     end
@@ -173,15 +229,21 @@ defmodule ElixirScope.MessageInterceptor do
     # Skip this message if tracing level is not appropriate
     if state.tracing_level in [:full, :messages_only] do
       # Record receive message events
-      TraceDB.store_event(:message, %{
-        id: System.unique_integer([:positive, :monotonic]),
-        timestamp: System.monotonic_time(),
-        pid: pid,
-        message: maybe_sanitize_message(msg, state.tracing_level),
-        type: :receive
-      })
-      
-      {:noreply, %{state | message_count: state.message_count + 1}}
+      try do
+        TraceDB.store_event(:message, %{
+          id: System.unique_integer([:positive, :monotonic]),
+          timestamp: System.monotonic_time(),
+          pid: pid,
+          message: maybe_sanitize_message(msg, state.tracing_level),
+          type: :receive
+        })
+        
+        {:noreply, %{state | message_count: state.message_count + 1}}
+      catch
+        _, _ ->
+          # If we fail to store, just continue
+          {:noreply, state}
+      end
     else
       {:noreply, state}
     end
@@ -190,6 +252,23 @@ defmodule ElixirScope.MessageInterceptor do
   def handle_info({:trace_msg, _other_trace}, state) do
     # Ignore other trace messages
     {:noreply, state}
+  end
+  
+  def handle_info({:EXIT, _pid, _reason}, state) do
+    # Handle exit messages gracefully to avoid crashing
+    {:noreply, state}
+  end
+  
+  def terminate(_reason, state) do
+    # Clean up when the process is terminated
+    if state.enabled do
+      try do
+        :dbg.stop()
+      catch
+        _, _ -> :ok
+      end
+    end
+    :ok
   end
   
   # Private functions
