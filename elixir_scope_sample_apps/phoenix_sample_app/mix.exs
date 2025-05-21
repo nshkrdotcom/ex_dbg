@@ -46,7 +46,7 @@ defmodule PhoenixSampleApp.MixProject do
       {:jason, "~> 1.2"},
       {:plug_cowboy, "~> 2.5"},
       # Path dependency to ElixirScope
-      {:elixir_scope, path: "../../cursor"}
+      {:elixir_scope, path: "../cursor"}
     ]
   end
 
