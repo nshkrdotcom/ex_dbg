@@ -6,6 +6,7 @@ defmodule ElixirScope.TraceDB do
   - Storage for all trace events (process, message, state changes)
   - Efficient querying capabilities
   - Optional persistence to disk
+  - Event sampling for performance control
   """
   use GenServer
   
@@ -24,6 +25,7 @@ defmodule ElixirScope.TraceDB do
   * `:max_events` - Maximum number of events to store. Default: 10,000
   * `:persist` - Whether to persist events to disk. Default: `false`
   * `:persist_path` - Path for storing persisted data. Default: "./trace_data"
+  * `:sample_rate` - Percentage of events to record (float between 0.0 and 1.0). Default: 1.0 (all events)
   """
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -37,13 +39,15 @@ defmodule ElixirScope.TraceDB do
     max_events = Keyword.get(opts, :max_events, @max_events)
     persist = Keyword.get(opts, :persist, false)
     persist_path = Keyword.get(opts, :persist_path, "./trace_data")
+    sample_rate = Keyword.get(opts, :sample_rate, 1.0)
     
     state = %{
       storage_type: storage_type,
       max_events: max_events,
       persist: persist,
       persist_path: persist_path,
-      event_count: 0
+      event_count: 0,
+      sample_rate: sample_rate
     }
     
     # Create ETS tables
@@ -67,6 +71,8 @@ defmodule ElixirScope.TraceDB do
   
   @doc """
   Stores an event in the trace database.
+  
+  Events may be sampled based on the configured sample_rate.
   
   ## Example
   
@@ -165,49 +171,96 @@ defmodule ElixirScope.TraceDB do
   # GenServer callbacks
   
   def handle_cast({:store_event, type, event_data}, state) do
-    # Ensure timestamp is present
-    event_data = Map.put_new(event_data, :timestamp, System.monotonic_time())
-    
-    # Add event type and id
-    event_data = Map.put(event_data, :type, type)
-    id = System.unique_integer([:positive, :monotonic])
-    event_data = Map.put(event_data, :id, id)
-    
-    # Store the event based on its type
-    case type do
-      :state ->
-        # Store in the states table
-        :ets.insert(@states_table, {id, event_data})
-        
-        # Add to process index
-        if Map.has_key?(event_data, :pid) do
-          :ets.insert(@process_index, {event_data.pid, {:state, id}})
-        end
-        
-      _ ->
-        # Store in the events table
-        :ets.insert(@events_table, {id, event_data})
-        
-        # Add to process index if a pid is present
-        if Map.has_key?(event_data, :pid) do
-          :ets.insert(@process_index, {event_data.pid, {type, id}})
-        end
-        
-        # Add sender to process index for message events
-        if type == :message and Map.has_key?(event_data, :from_pid) do
-          :ets.insert(@process_index, {event_data.from_pid, {:message_sent, id}})
-        end
-        
-        # Add receiver to process index for message events
-        if type == :message and Map.has_key?(event_data, :to_pid) do
-          :ets.insert(@process_index, {event_data.to_pid, {:message_received, id}})
-        end
+    # Apply sampling - skip some events based on sample rate
+    if should_record_event?(state.sample_rate, type, event_data) do
+      # Ensure timestamp is present
+      event_data = Map.put_new(event_data, :timestamp, System.monotonic_time())
+      
+      # Add event type and id
+      event_data = Map.put(event_data, :type, type)
+      id = System.unique_integer([:positive, :monotonic])
+      event_data = Map.put(event_data, :id, id)
+      
+      # Store the event based on its type
+      case type do
+        :state ->
+          # Store in the states table
+          :ets.insert(@states_table, {id, event_data})
+          
+          # Add to process index
+          if Map.has_key?(event_data, :pid) do
+            :ets.insert(@process_index, {event_data.pid, {:state, id}})
+          end
+          
+        _ ->
+          # Store in the events table
+          :ets.insert(@events_table, {id, event_data})
+          
+          # Add to process index if a pid is present
+          if Map.has_key?(event_data, :pid) do
+            :ets.insert(@process_index, {event_data.pid, {type, id}})
+          end
+          
+          # Add sender to process index for message events
+          if type == :message and Map.has_key?(event_data, :from_pid) do
+            :ets.insert(@process_index, {event_data.from_pid, {:message_sent, id}})
+          end
+          
+          # Add receiver to process index for message events
+          if type == :message and Map.has_key?(event_data, :to_pid) do
+            :ets.insert(@process_index, {event_data.to_pid, {:message_received, id}})
+          end
+      end
+      
+      # Increment event count
+      new_state = %{state | event_count: state.event_count + 1}
+      {:noreply, new_state}
+    else
+      # Skip this event due to sampling
+      {:noreply, state}
+    end
+  end
+  
+  # Helper function to determine if an event should be recorded based on sampling
+  defp should_record_event?(1.0, _type, _event_data), do: true  # Always record at 100%
+  defp should_record_event?(0.0, _type, _event_data), do: false # Never record at 0%
+  defp should_record_event?(sample_rate, type, event_data) do
+    # Always record critical events regardless of sample rate:
+    # - Process spawn/exit events
+    # - Crashes and errors
+    # - Significant state transitions
+    critical_event = case {type, event_data[:event]} do
+      {:process, :spawn} -> true
+      {:process, :exit} -> true
+      {:process, :crash} -> true
+      {:error, _} -> true
+      _ -> false
     end
     
-    # Increment event count
-    new_state = %{state | event_count: state.event_count + 1}
-    
-    {:noreply, new_state}
+    # When using a custom sample rate, we need a deterministic way to decide
+    # For critical events, always return true
+    if critical_event do
+      true
+    else
+      # Use consistent sampling based on event characteristics to avoid bias
+      # This uses the event's intrinsic properties to determine if it should be sampled
+      seed = 
+        cond do
+          # Use PID and timestamp to get a consistent hash for the event
+          Map.has_key?(event_data, :pid) ->
+            pid_binary = :erlang.term_to_binary(event_data.pid)
+            timestamp = Map.get(event_data, :timestamp, System.monotonic_time())
+            hash_input = pid_binary <> :erlang.term_to_binary(timestamp)
+            :erlang.phash2(hash_input, 1000) / 1000
+            
+          # Fall back to random sampling if no PID is available
+          true ->
+            :rand.uniform()
+        end
+      
+      # Compare the seed with the sample rate
+      seed <= sample_rate
+    end
   end
   
   def handle_call({:query_events, filters}, _from, state) do
