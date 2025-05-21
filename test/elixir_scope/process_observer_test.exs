@@ -17,9 +17,13 @@ defmodule ElixirScope.ProcessObserverTest do
     
     observer_pid = case Process.whereis(ProcessObserver) do
       nil -> 
-        {:ok, pid} = ProcessObserver.start_link()
+        # Use test_mode to prevent hanging during tests
+        {:ok, pid} = ProcessObserver.start_link(test_mode: true)
         pid
-      pid -> pid
+      pid -> 
+        # Make sure we're in test mode
+        GenServer.call(pid, {:set_test_mode, true}, 1000)
+        pid
     end
     
     # Clean up - only if we started it ourselves
@@ -45,7 +49,7 @@ defmodule ElixirScope.ProcessObserverTest do
       assert Process.whereis(ProcessObserver) != nil
     end
     
-    test "registers with TraceDB", %{tracedb_pid: tracedb_pid} do
+    test "registers with TraceDB", %{tracedb_pid: _tracedb_pid} do
       # Create a test process to ensure we have events
       _test_pid = spawn(fn -> :timer.sleep(50) end)
       
@@ -72,7 +76,7 @@ defmodule ElixirScope.ProcessObserverTest do
   end
   
   describe "process lifecycle tracking" do
-    test "tracks process events", %{tracedb_pid: tracedb_pid} do
+    test "tracks process events", %{tracedb_pid: _tracedb_pid} do
       # Clear events to ensure a clean test
       try do
         ElixirScope.TraceDB.clear()

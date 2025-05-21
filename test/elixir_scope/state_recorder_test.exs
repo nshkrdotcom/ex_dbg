@@ -28,6 +28,7 @@ defmodule ElixirScope.StateRecorderTest do
   
   # Define a test GenServer that uses the StateRecorder for testing
   defmodule TestGenServer do
+    # Order matters here - use GenServer first, then StateRecorder
     use GenServer
     use ElixirScope.StateRecorder
     
@@ -35,7 +36,10 @@ defmodule ElixirScope.StateRecorderTest do
       GenServer.start_link(__MODULE__, initial_state)
     end
     
+    # Implement without using super to avoid issues
+    # This replaces the existing init method
     def init(initial_state) do
+      # We explicitly return the {:ok, state} tuple
       {:ok, initial_state}
     end
     

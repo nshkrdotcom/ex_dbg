@@ -8,7 +8,7 @@ defmodule ElixirScope.AIIntegration do
   - Exporting trace data in AI-consumable formats
   """
   
-  alias ElixirScope.{TraceDB, QueryEngine, CodeTracer}
+  alias ElixirScope.QueryEngine
   
   @doc """
   Sets up AI integration.
@@ -29,6 +29,21 @@ defmodule ElixirScope.AIIntegration do
   Registers all ElixirScope tools with Tidewave.
   """
   def register_tidewave_tools do
+    # Check if Tidewave.Plugin module is actually available
+    if Code.ensure_loaded?(Tidewave.Plugin) && function_exported?(Tidewave.Plugin, :register_tool, 1) do
+      # Register the tools only if the module and function exist
+      register_all_tools()
+    else
+      # Return an error if Tidewave.Plugin is not available
+      {:error, :tidewave_plugin_not_available}
+    end
+  end
+  
+  # Add compiler directive to suppress warnings about undefined function
+  @compile {:no_warn_undefined, Tidewave.Plugin}
+  
+  # Private function to register all tools if Tidewave is available
+  defp register_all_tools do
     # Tool 1: Get state timeline for a process
     Tidewave.Plugin.register_tool(%{
       name: "elixir_scope_get_state_timeline",
@@ -153,6 +168,8 @@ defmodule ElixirScope.AIIntegration do
         }
       }
     })
+    
+    :ok
   end
 
   # Tidewave tool implementation functions

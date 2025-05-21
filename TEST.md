@@ -76,7 +76,17 @@ The foundational tests cover the `TraceDB` module, which is the core storage and
   - ⏳ Properly diffs state changes
 
 ### MessageInterceptor Tests
-(To be implemented)
+- ✅ Initialization
+  - ✅ Starts with default options
+  - ✅ Can enable and disable tracing
+  - ✅ Can set different tracing levels
+- ✅ Basic Operations  
+  - ✅ Can be enabled and disabled
+  - ✅ Can change tracing level
+- ✅ Message Interception
+  - ✅ Captures sent messages
+  - ✅ Traces messages for a specific process
+  - ✅ Captures GenServer call messages
 
 ### CodeTracer Tests
 (To be implemented)
@@ -90,4 +100,78 @@ The foundational tests cover the `TraceDB` module, which is the core storage and
 
 ## Integration Tests
 
-(To be implemented) 
+(To be implemented)
+
+## Test Files Overview
+
+The ElixirScope test suite includes the following test files:
+
+1. `test/elixir_scope/trace_db_test.exs` - Tests for the core TraceDB module (940 lines)
+2. `test/elixir_scope/process_observer_test.exs` - Tests for the ProcessObserver module (126 lines)
+3. `test/elixir_scope/state_recorder_test.exs` - Tests for the StateRecorder module (212 lines)
+4. `test/elixir_scope/message_interceptor_test.exs` - Tests for the MessageInterceptor module (273 lines)
+
+## Running Tests
+
+### Running All Tests
+
+To run the entire test suite:
+
+```bash
+mix test
+```
+
+### Running Specific Test Files
+
+To run tests for a specific module:
+
+```bash
+# Run TraceDB tests
+mix test test/elixir_scope/trace_db_test.exs
+
+# Run ProcessObserver tests
+mix test test/elixir_scope/process_observer_test.exs
+
+# Run StateRecorder tests
+mix test test/elixir_scope/state_recorder_test.exs
+
+# Run MessageInterceptor tests
+mix test test/elixir_scope/message_interceptor_test.exs
+```
+
+### Running Specific Test Cases
+
+To run a specific test or test group:
+
+```bash
+# Run a specific test case (using line number)
+mix test test/elixir_scope/trace_db_test.exs:42
+
+# Run a specific test group (using the describe string)
+mix test --only describe:"initialization"
+```
+
+### Test Options
+
+Common test options:
+
+```bash
+# Run tests with extended timeout (for slower tests)
+mix test --timeout 60000
+
+# Get detailed information about each test
+mix test --trace
+
+# Run tests matching a specific pattern
+mix test --only tag_name
+mix test --exclude tag_name
+```
+
+### Test Environment
+
+The tests are configured to run in isolation, with several optimizations:
+
+- Test mode is enabled for most modules to reduce console output
+- StringIO is used to suppress unwanted logging
+- Sampling rates are adjusted for predictable test behavior
+- Tests that interact with tracing are marked as async: false to prevent interference 

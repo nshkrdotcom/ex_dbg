@@ -66,19 +66,21 @@ defmodule ElixirScope.CodeTracer do
     else
       try do
         # Start tracer if it's not already started
-        if not state.enabled do
+        new_state = if not state.enabled do
           :dbg.tracer(:process, {fn msg, _ -> handle_trace_msg(msg) end, []})
-          state = %{state | enabled: true}
+          %{state | enabled: true}
+        else
+          state
         end
         
         # Set up function tracing for the module
-        :dbg.tpl(module, :_, [{'_', [], [{:return_trace}]}])
+        :dbg.tpl(module, :_, [{~c"_", [], [{:return_trace}]}])
         
         # Store module source info for reference
         source_info = get_module_source_info(module)
-        modules = Map.put(state.modules, module, source_info)
+        modules = Map.put(new_state.modules, module, source_info)
         
-        {:reply, :ok, %{state | modules: modules}}
+        {:reply, :ok, %{new_state | modules: modules}}
       rescue
         e -> 
           {:reply, {:error, e}, state}
@@ -99,7 +101,7 @@ defmodule ElixirScope.CodeTracer do
         
         # If no more modules to trace, stop tracer
         state = if Enum.empty?(modules) do
-          :dbg.stop_clear()
+          :dbg.stop()
           %{state | modules: modules, enabled: false}
         else
           %{state | modules: modules}

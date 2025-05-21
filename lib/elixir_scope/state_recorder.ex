@@ -29,19 +29,36 @@ defmodule ElixirScope.StateRecorder do
       # Store original callbacks if they exist
       @before_compile ElixirScope.StateRecorder
       
-      # Track if the module has defined each callback
-      Module.register_attribute(__MODULE__, :has_init, accumulate: false, persist: false)
-      Module.register_attribute(__MODULE__, :has_handle_call, accumulate: false, persist: false)
-      Module.register_attribute(__MODULE__, :has_handle_cast, accumulate: false, persist: false)
-      Module.register_attribute(__MODULE__, :has_handle_info, accumulate: false, persist: false)
-      Module.register_attribute(__MODULE__, :has_terminate, accumulate: false, persist: false)
+      # Extend GenServer functionality by capturing original functions
+      @es_original_init (
+        if function_exported?(__MODULE__, :init, 1) do
+          &__MODULE__.init/1
+        end
+      )
       
-      # Default all to false
-      @has_init false
-      @has_handle_call false
-      @has_handle_cast false
-      @has_handle_info false
-      @has_terminate false
+      @es_original_handle_call (
+        if function_exported?(__MODULE__, :handle_call, 3) do
+          &__MODULE__.handle_call/3
+        end
+      )
+      
+      @es_original_handle_cast (
+        if function_exported?(__MODULE__, :handle_cast, 2) do
+          &__MODULE__.handle_cast/2
+        end
+      )
+      
+      @es_original_handle_info (
+        if function_exported?(__MODULE__, :handle_info, 2) do
+          &__MODULE__.handle_info/2
+        end
+      )
+      
+      @es_original_terminate (
+        if function_exported?(__MODULE__, :terminate, 2) do
+          &__MODULE__.terminate/2
+        end
+      )
       
       # Override callbacks to add state logging
       def init(args) do
@@ -53,7 +70,11 @@ defmodule ElixirScope.StateRecorder do
           timestamp: System.monotonic_time()
         })
         
-        result = super(args)
+        # Call original init if it exists, otherwise use default behavior
+        result = case @es_original_init do
+          nil -> {:ok, args}
+          func -> func.(args)
+        end
         
         case result do
           {:ok, state} ->
@@ -70,9 +91,6 @@ defmodule ElixirScope.StateRecorder do
         result
       end
       
-      # Mark that we've defined our own init
-      @has_init true
-      
       def handle_call(msg, from, state) do
         ElixirScope.TraceDB.store_event(:genserver, %{
           pid: self(),
@@ -84,7 +102,11 @@ defmodule ElixirScope.StateRecorder do
           timestamp: System.monotonic_time()
         })
         
-        result = super(msg, from, state)
+        # Call original handle_call if it exists, otherwise use default behavior
+        result = case @es_original_handle_call do
+          nil -> {:reply, {:error, :not_implemented}, state}
+          func -> func.(msg, from, state)
+        end
         
         case result do
           {:reply, reply, new_state} ->
@@ -131,9 +153,6 @@ defmodule ElixirScope.StateRecorder do
         result
       end
       
-      # Mark that we've defined our own handle_call
-      @has_handle_call true
-      
       def handle_cast(msg, state) do
         ElixirScope.TraceDB.store_event(:genserver, %{
           pid: self(),
@@ -144,7 +163,11 @@ defmodule ElixirScope.StateRecorder do
           timestamp: System.monotonic_time()
         })
         
-        result = super(msg, state)
+        # Call original handle_cast if it exists, otherwise use default behavior
+        result = case @es_original_handle_cast do
+          nil -> {:noreply, state}
+          func -> func.(msg, state)
+        end
         
         case result do
           {:noreply, new_state} ->
@@ -170,9 +193,6 @@ defmodule ElixirScope.StateRecorder do
         
         result
       end
-      
-      # Mark that we've defined our own handle_cast
-      @has_handle_cast true
       
       def handle_info(msg, state) do
         ElixirScope.TraceDB.store_event(:genserver, %{
@@ -184,7 +204,11 @@ defmodule ElixirScope.StateRecorder do
           timestamp: System.monotonic_time()
         })
         
-        result = super(msg, state)
+        # Call original handle_info if it exists, otherwise use default behavior
+        result = case @es_original_handle_info do
+          nil -> {:noreply, state}
+          func -> func.(msg, state)
+        end
         
         case result do
           {:noreply, new_state} ->
@@ -211,9 +235,6 @@ defmodule ElixirScope.StateRecorder do
         result
       end
       
-      # Mark that we've defined our own handle_info
-      @has_handle_info true
-      
       def terminate(reason, state) do
         ElixirScope.TraceDB.store_event(:genserver, %{
           pid: self(),
@@ -224,11 +245,12 @@ defmodule ElixirScope.StateRecorder do
           timestamp: System.monotonic_time()
         })
         
-        super(reason, state)
+        # Call original terminate if it exists, otherwise use default behavior
+        case @es_original_terminate do
+          nil -> :ok
+          func -> func.(reason, state)
+        end
       end
-      
-      # Mark that we've defined our own terminate
-      @has_terminate true
       
       # Helper to sanitize state for storage
       defp sanitize_state(state) do
@@ -243,84 +265,11 @@ defmodule ElixirScope.StateRecorder do
     end
   end
   
-  @doc """
-  Provides default implementations for callbacks that weren't defined.
-  """
+  # Empty implementation since we don't need the default implementation behavior anymore
+  # but we still have the @before_compile reference in the __using__ macro
   defmacro __before_compile__(_env) do
     quote do
-      unless @has_init do
-        def init(args) do
-          ElixirScope.TraceDB.store_event(:genserver, %{
-            pid: self(),
-            module: __MODULE__,
-            callback: :init,
-            args: sanitize_state(args),
-            timestamp: System.monotonic_time()
-          })
-          
-          {:ok, args}
-        end
-      end
-      
-      unless @has_handle_call do
-        def handle_call(msg, _from, state) do
-          ElixirScope.TraceDB.store_event(:genserver, %{
-            pid: self(),
-            module: __MODULE__,
-            callback: :handle_call,
-            message: sanitize_state(msg),
-            state_before: sanitize_state(state),
-            timestamp: System.monotonic_time()
-          })
-          
-          {:reply, {:error, :not_implemented}, state}
-        end
-      end
-      
-      unless @has_handle_cast do
-        def handle_cast(msg, state) do
-          ElixirScope.TraceDB.store_event(:genserver, %{
-            pid: self(),
-            module: __MODULE__,
-            callback: :handle_cast,
-            message: sanitize_state(msg),
-            state_before: sanitize_state(state),
-            timestamp: System.monotonic_time()
-          })
-          
-          {:noreply, state}
-        end
-      end
-      
-      unless @has_handle_info do
-        def handle_info(msg, state) do
-          ElixirScope.TraceDB.store_event(:genserver, %{
-            pid: self(),
-            module: __MODULE__,
-            callback: :handle_info,
-            message: sanitize_state(msg),
-            state_before: sanitize_state(state),
-            timestamp: System.monotonic_time()
-          })
-          
-          {:noreply, state}
-        end
-      end
-      
-      unless @has_terminate do
-        def terminate(reason, state) do
-          ElixirScope.TraceDB.store_event(:genserver, %{
-            pid: self(),
-            module: __MODULE__,
-            callback: :terminate,
-            reason: sanitize_state(reason),
-            state: sanitize_state(state),
-            timestamp: System.monotonic_time()
-          })
-          
-          :ok
-        end
-      end
+      # No additional code needed here
     end
   end
   
@@ -461,9 +410,9 @@ defmodule ElixirScope.StateRecorder do
   end
   
   # Helper for sys callbacks
-  defp fun(type) do
+  defp fun(_type) do
     fn
-      {from, state}, msg ->
+      {from, state}, _msg ->
         if from != Process.whereis(:sys) do
           send(from, {:trace, self(), :state_change, state, :sys.get_state(self())})
         end

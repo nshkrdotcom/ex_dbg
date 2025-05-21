@@ -174,7 +174,7 @@ defmodule ElixirScope do
   Stops all tracing and cleans up resources.
   """
   def stop do
-    :dbg.stop_clear()
+    :dbg.stop()
     
     # Stop the GenServers
     GenServer.stop(ProcessObserver)

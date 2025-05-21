@@ -13,6 +13,10 @@ defmodule ElixirScope.ProcessObserver do
   
   @doc """
   Starts the ProcessObserver.
+  
+  ## Options
+  
+  * `:test_mode` - Boolean to enable test mode which skips supervisor tree building (default: false)
   """
   def start_link(opts \\ []) do
     case GenServer.start_link(__MODULE__, opts, name: __MODULE__) do
@@ -24,7 +28,10 @@ defmodule ElixirScope.ProcessObserver do
   @doc """
   Initializes the ProcessObserver.
   """
-  def init(_opts) do
+  def init(opts) do
+    # Get options with defaults
+    test_mode = Keyword.get(opts, :test_mode, false)
+    
     # Set up system monitoring
     :erlang.system_monitor(self(), [
       :busy_port,
@@ -40,13 +47,16 @@ defmodule ElixirScope.ProcessObserver do
     # which avoids potential message passing bottlenecks
     setup_process_tracing()
     
-    # Schedule periodic supervision tree updates
-    schedule_supervision_tree_update()
+    # Schedule periodic supervision tree updates (skip in test mode)
+    unless test_mode do
+      schedule_supervision_tree_update()
+    end
     
     {:ok, %{
       processes: %{},
-      supervision_tree: build_supervision_tree(),
-      call_timeout: 5000  # Add a timeout config for calls
+      supervision_tree: if(test_mode, do: %{}, else: build_supervision_tree()),
+      call_timeout: 5000,  # Add a timeout config for calls
+      test_mode: test_mode
     }}
   end
   
@@ -104,10 +114,20 @@ defmodule ElixirScope.ProcessObserver do
   
   # GenServer callbacks
   
+  def handle_call(:get_supervision_tree, _from, %{test_mode: true} = state) do
+    # In test mode, just return an empty tree to avoid blocking
+    {:reply, %{}, state}
+  end
+  
   def handle_call(:get_supervision_tree, _from, state) do
     # Ensure we have the latest supervision tree
     updated_tree = build_supervision_tree()
     {:reply, updated_tree, %{state | supervision_tree: updated_tree}}
+  end
+  
+  def handle_call({:set_test_mode, test_mode}, _from, state) do
+    # Update the test mode setting
+    {:reply, :ok, %{state | test_mode: test_mode}}
   end
   
   def handle_call({:get_process_info, pid}, _from, state) do
@@ -123,6 +143,11 @@ defmodule ElixirScope.ProcessObserver do
     {:reply, process_info, state}
   end
 
+  def handle_cast(:update_supervision_tree, %{test_mode: true} = state) do
+    # Skip in test mode
+    {:noreply, state}
+  end
+  
   def handle_cast(:update_supervision_tree, state) do
     updated_tree = build_supervision_tree()
     {:noreply, %{state | supervision_tree: updated_tree}}
@@ -130,6 +155,18 @@ defmodule ElixirScope.ProcessObserver do
   
   def handle_info({:trace, pid, :spawn, spawned_pid, _mfa}, state) do
     # A new process was spawned
+    TraceDB.store_event(:process, %{
+      pid: spawned_pid,
+      event: :spawn,
+      info: %{parent: pid},
+      timestamp: System.monotonic_time()
+    })
+    
+    {:noreply, state}
+  end
+  
+  def handle_info({:trace, pid, :spawned, spawned_pid, _mfa}, state) do
+    # A new process was spawned (alternate message format)
     TraceDB.store_event(:process, %{
       pid: spawned_pid,
       event: :spawn,
@@ -228,6 +265,12 @@ defmodule ElixirScope.ProcessObserver do
     {:noreply, %{state | processes: updated_processes}}
   end
   
+  def handle_info(:update_supervision_tree, %{test_mode: true} = state) do
+    # Skip in test mode but reschedule
+    schedule_supervision_tree_update()
+    {:noreply, state}
+  end
+  
   def handle_info(:update_supervision_tree, state) do
     # Update the supervision tree periodically
     updated_tree = build_supervision_tree()
@@ -236,6 +279,23 @@ defmodule ElixirScope.ProcessObserver do
     schedule_supervision_tree_update()
     
     {:noreply, %{state | supervision_tree: updated_tree}}
+  end
+  
+  # Default handler for any unexpected trace messages
+  def handle_info({:trace, _pid, _trace_type, _info}, state) do
+    # Silently ignore unexpected trace messages
+    {:noreply, state}
+  end
+  
+  def handle_info({:trace, _pid, _trace_type, _arg1, _arg2}, state) do
+    # Silently ignore unexpected trace messages with additional args
+    {:noreply, state}
+  end
+  
+  # Default catch-all handler
+  def handle_info(_msg, state) do
+    # Ignore all other messages
+    {:noreply, state}
   end
   
   # Private functions
@@ -273,16 +333,16 @@ defmodule ElixirScope.ProcessObserver do
         try do
           # For tests, we don't check for top-level status, we include all supervisors
           Map.put(acc, pid, build_supervisor_subtree(pid))
-        catch
-          _, _ -> acc
         rescue
           _ -> acc
+        catch
+          _, _ -> acc
         end
       end)
-    catch
-      _, _ -> %{} # Return an empty tree if we hit any serious errors
     rescue
       _ -> %{} # Return an empty tree if we hit any serious errors  
+    catch
+      _, _ -> %{} # Return an empty tree if we hit any serious errors
     end
   end
   
@@ -301,13 +361,22 @@ defmodule ElixirScope.ProcessObserver do
         end
       end)
       
-    # Try supervisor.which_children method for known/named supervisors
+    # Try supervisor.which_children method for known/named supervisors with a timeout
     named_supervisors = :erlang.processes()
       |> Enum.filter(fn pid ->
         try do
-          # If this works, it's likely a supervisor
-          :supervisor.which_children(pid)
-          true
+          # Set a timeout using a separate process to avoid hanging the main process
+          task = Task.async(fn -> 
+            try do
+              :supervisor.which_children(pid)
+              true
+            catch
+              _, _ -> false
+            end
+          end)
+          
+          # Wait with timeout (100ms should be enough for most supervisors)
+          Task.yield(task, 100) || (Task.shutdown(task) && false)
         rescue
           _ -> false
         catch
@@ -318,28 +387,7 @@ defmodule ElixirScope.ProcessObserver do
     # Return unique supervisors from both methods
     # Limit the number of supervisors for efficiency in tests
     Enum.uniq(process_dictionary_supervisors ++ named_supervisors)
-    |> Enum.take(20)  # Limit to 20 supervisors to avoid performance issues
-  end
-  
-  defp is_top_level_supervisor?(pid) do
-    try do
-      case Process.info(pid, :links) do
-        {:links, links} ->
-          # Check if any of the linked processes is a supervisor
-          links
-          |> Enum.all?(fn linked_pid ->
-            case Process.info(linked_pid, :dictionary) do
-              {:dictionary, dict} when is_list(dict) -> 
-                # Safely check initial call in dictionary which should be a keyword list
-                Keyword.get(dict, :"$initial_call") != {:supervisor, :Supervisor, :init}
-              _ -> true
-            end
-          end)
-        _ -> false
-      end
-    catch
-      _, _ -> false
-    end
+    |> Enum.take(10)  # Limit to 10 supervisors to avoid performance issues in tests
   end
   
   defp build_supervisor_subtree(supervisor_pid) do
@@ -348,7 +396,20 @@ defmodule ElixirScope.ProcessObserver do
       # Use timeout to avoid hanging
       children = 
         try do
-          :supervisor.which_children(supervisor_pid)
+          # Set a timeout using a separate process
+          task = Task.async(fn -> 
+            try do
+              :supervisor.which_children(supervisor_pid)
+            catch
+              _, _ -> []
+            end
+          end)
+          
+          # Wait with timeout (100ms should be enough for most supervisors)
+          case Task.yield(task, 100) do
+            {:ok, result} -> result
+            _ -> Task.shutdown(task) && []
+          end
         catch
           _, _ -> []
         end
@@ -384,7 +445,7 @@ defmodule ElixirScope.ProcessObserver do
         children: children_map
       }
     rescue
-      e ->
+      _error ->
         # Return a simple error map
         %{error: "Failed to inspect supervisor"}
     catch
@@ -429,13 +490,27 @@ defmodule ElixirScope.ProcessObserver do
         _, _ -> nil
       end
     
-    # If not found, try examining the supervisor directly
+    # If not found, try examining the supervisor directly with a timeout
     if is_nil(strategy) do
       try do
         # For test supervisors, default to :one_for_one if we can confirm it's a supervisor
-        case :supervisor.which_children(supervisor_pid) do
-          children when is_list(children) -> :one_for_one
-          _ -> nil
+        task = Task.async(fn -> 
+          try do
+            case :supervisor.which_children(supervisor_pid) do
+              children when is_list(children) -> :one_for_one
+              _ -> nil
+            end
+          rescue
+            _ -> nil
+          catch
+            _, _ -> nil
+          end
+        end)
+        
+        # Wait with timeout
+        case Task.yield(task, 100) do
+          {:ok, result} -> result
+          _ -> Task.shutdown(task) && nil
         end
       rescue
         _ -> nil

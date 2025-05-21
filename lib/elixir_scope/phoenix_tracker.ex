@@ -12,75 +12,22 @@ defmodule ElixirScope.PhoenixTracker do
   alias ElixirScope.TraceDB
   
   @doc """
-  Sets up Phoenix-specific tracing by attaching telemetry handlers.
+  Configures Phoenix to trace all Endpoint-related activity.
   
-  ## Parameters
-  
-  * `endpoint` - The Phoenix endpoint module to instrument (optional)
-  
-  ## Example
-  
-      ElixirScope.PhoenixTracker.setup_phoenix_tracing(MyAppWeb.Endpoint)
+  This is a high-level function that enables comprehensive tracing 
+  of Phoenix components.
   """
-  def setup_phoenix_tracing(endpoint \\ nil) do
-    # Attach telemetry handlers for Phoenix events
+  def setup_phoenix_tracing(_endpoint \\ nil) do
+    # Trace Phoenix.PubSub
+    trace_phoenix_pubsub()
     
-    # HTTP request events
-    :telemetry.attach(
-      "elixir-scope-phoenix-endpoint",
-      [:phoenix, :endpoint, :stop],
-      &handle_endpoint_event/4,
-      nil
-    )
+    # Trace Phoenix Channels
+    trace_phoenix_channels()
     
-    # Router dispatch events
-    :telemetry.attach(
-      "elixir-scope-phoenix-router",
-      [:phoenix, :router_dispatch, :stop],
-      &handle_router_event/4,
-      nil
-    )
+    # Trace Phoenix Controllers
+    trace_phoenix_controllers()
     
-    # Channel events
-    :telemetry.attach(
-      "elixir-scope-phoenix-channel-join",
-      [:phoenix, :channel_join, :stop],
-      &handle_channel_join_event/4,
-      nil
-    )
-    
-    # Socket events
-    :telemetry.attach(
-      "elixir-scope-phoenix-socket",
-      [:phoenix, :socket_connected],
-      &handle_socket_event/4,
-      nil
-    )
-    
-    # LiveView events
-    if Code.ensure_loaded?(Phoenix.LiveView) do
-      :telemetry.attach(
-        "elixir-scope-phoenix-live-view-mount",
-        [:phoenix, :live_view, :mount, :stop],
-        &handle_live_view_mount_event/4,
-        nil
-      )
-      
-      :telemetry.attach(
-        "elixir-scope-phoenix-live-view-render",
-        [:phoenix, :live_view, :render, :stop],
-        &handle_live_view_render_event/4,
-        nil
-      )
-      
-      :telemetry.attach(
-        "elixir-scope-phoenix-live-view-handle-event",
-        [:phoenix, :live_view, :handle_event, :stop],
-        &handle_live_view_event/4,
-        nil
-      )
-    end
-    
+    # Return success
     :ok
   end
   
@@ -104,16 +51,12 @@ defmodule ElixirScope.PhoenixTracker do
   end
   
   @doc """
-  Hooks into Phoenix PubSub to track broadcasts.
+  Enables tracing for a specific Phoenix PubSub server.
   
-  ## Example
-  
-      ElixirScope.PhoenixTracker.track_pubsub(MyApp.PubSub)
+  Use this to monitor all PubSub operations happening in a Phoenix app.
   """
-  def track_pubsub(pubsub_server) do
-    # This would require customization based on the application
-    # Generally, you'd need to create a wrapper module or patch the PubSub server
-    # to track broadcasts/subscriptions
+  def track_pubsub(_pubsub_server) do
+    # Not implemented yet
     :ok
   end
   
@@ -220,6 +163,91 @@ defmodule ElixirScope.PhoenixTracker do
       inspect(value, limit: 50, pretty: false)
     rescue
       _ -> "<<error inspecting value>>"
+    end
+  end
+  
+  # Private functions for different Phoenix components
+  
+  defp trace_phoenix_pubsub do
+    # Set up PubSub tracing
+    if Code.ensure_loaded?(Phoenix.PubSub) do
+      # No specific telemetry events for PubSub yet
+      # Future: Could monkey-patch PubSub modules
+      :ok
+    else
+      :ok
+    end
+  end
+  
+  defp trace_phoenix_channels do
+    # Set up Channels tracing
+    if Code.ensure_loaded?(Phoenix.Channel) do
+      :telemetry.attach(
+        "elixir-scope-phoenix-channel-join",
+        [:phoenix, :channel_join, :stop],
+        &handle_channel_join_event/4,
+        nil
+      )
+      
+      # Socket events
+      :telemetry.attach(
+        "elixir-scope-phoenix-socket",
+        [:phoenix, :socket_connected],
+        &handle_socket_event/4,
+        nil
+      )
+      :ok
+    else
+      :ok
+    end
+  end
+  
+  defp trace_phoenix_controllers do
+    # Set up Controller tracing
+    if Code.ensure_loaded?(Phoenix.Controller) do
+      # HTTP request events
+      :telemetry.attach(
+        "elixir-scope-phoenix-endpoint",
+        [:phoenix, :endpoint, :stop],
+        &handle_endpoint_event/4,
+        nil
+      )
+      
+      # Router dispatch events
+      :telemetry.attach(
+        "elixir-scope-phoenix-router",
+        [:phoenix, :router_dispatch, :stop],
+        &handle_router_event/4,
+        nil
+      )
+      
+      # LiveView events if available
+      if Code.ensure_loaded?(Phoenix.LiveView) do
+        :telemetry.attach(
+          "elixir-scope-phoenix-live-view-mount",
+          [:phoenix, :live_view, :mount, :stop],
+          &handle_live_view_mount_event/4,
+          nil
+        )
+        
+        :telemetry.attach(
+          "elixir-scope-phoenix-live-view-render",
+          [:phoenix, :live_view, :render, :stop],
+          &handle_live_view_render_event/4,
+          nil
+        )
+        
+        :telemetry.attach(
+          "elixir-scope-phoenix-live-view-handle-event",
+          [:phoenix, :live_view, :handle_event, :stop],
+          &handle_live_view_event/4,
+          nil
+        )
+      end
+      
+      :ok
+    else
+      :ok
     end
   end
 end 
