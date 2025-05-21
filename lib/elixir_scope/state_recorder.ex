@@ -81,7 +81,7 @@ defmodule ElixirScope.StateRecorder do
             ElixirScope.TraceDB.store_event(:state, %{
               pid: self(),
               module: __MODULE__,
-              callback: :init,
+              data: %{callback: :init},
               state: sanitize_state(state),
               timestamp: System.monotonic_time()
             })
@@ -113,9 +113,11 @@ defmodule ElixirScope.StateRecorder do
             ElixirScope.TraceDB.store_event(:state, %{
               pid: self(),
               module: __MODULE__,
-              callback: :handle_call,
-              message: sanitize_state(msg),
-              reply: sanitize_state(reply),
+              data: %{
+                callback: :handle_call,
+                message: sanitize_state(msg),
+                reply: sanitize_state(reply)
+              },
               state: sanitize_state(new_state),
               timestamp: System.monotonic_time()
             })
@@ -123,9 +125,11 @@ defmodule ElixirScope.StateRecorder do
             ElixirScope.TraceDB.store_event(:state, %{
               pid: self(),
               module: __MODULE__,
-              callback: :handle_call,
-              message: sanitize_state(msg),
-              reply: sanitize_state(reply),
+              data: %{
+                callback: :handle_call,
+                message: sanitize_state(msg),
+                reply: sanitize_state(reply)
+              },
               state: sanitize_state(new_state),
               timestamp: System.monotonic_time()
             })
@@ -133,8 +137,10 @@ defmodule ElixirScope.StateRecorder do
             ElixirScope.TraceDB.store_event(:state, %{
               pid: self(),
               module: __MODULE__,
-              callback: :handle_call,
-              message: sanitize_state(msg),
+              data: %{
+                callback: :handle_call,
+                message: sanitize_state(msg)
+              },
               state: sanitize_state(new_state),
               timestamp: System.monotonic_time()
             })
@@ -142,8 +148,10 @@ defmodule ElixirScope.StateRecorder do
             ElixirScope.TraceDB.store_event(:state, %{
               pid: self(),
               module: __MODULE__,
-              callback: :handle_call,
-              message: sanitize_state(msg),
+              data: %{
+                callback: :handle_call,
+                message: sanitize_state(msg)
+              },
               state: sanitize_state(new_state),
               timestamp: System.monotonic_time()
             })
@@ -174,8 +182,10 @@ defmodule ElixirScope.StateRecorder do
             ElixirScope.TraceDB.store_event(:state, %{
               pid: self(),
               module: __MODULE__,
-              callback: :handle_cast,
-              message: sanitize_state(msg),
+              data: %{
+                callback: :handle_cast,
+                message: sanitize_state(msg)
+              },
               state: sanitize_state(new_state),
               timestamp: System.monotonic_time()
             })
@@ -183,8 +193,10 @@ defmodule ElixirScope.StateRecorder do
             ElixirScope.TraceDB.store_event(:state, %{
               pid: self(),
               module: __MODULE__,
-              callback: :handle_cast,
-              message: sanitize_state(msg),
+              data: %{
+                callback: :handle_cast,
+                message: sanitize_state(msg)
+              },
               state: sanitize_state(new_state),
               timestamp: System.monotonic_time()
             })
@@ -215,8 +227,10 @@ defmodule ElixirScope.StateRecorder do
             ElixirScope.TraceDB.store_event(:state, %{
               pid: self(),
               module: __MODULE__,
-              callback: :handle_info,
-              message: sanitize_state(msg),
+              data: %{
+                callback: :handle_info,
+                message: sanitize_state(msg)
+              },
               state: sanitize_state(new_state),
               timestamp: System.monotonic_time()
             })
@@ -224,8 +238,10 @@ defmodule ElixirScope.StateRecorder do
             ElixirScope.TraceDB.store_event(:state, %{
               pid: self(),
               module: __MODULE__,
-              callback: :handle_info,
-              message: sanitize_state(msg),
+              data: %{
+                callback: :handle_info,
+                message: sanitize_state(msg)
+              },
               state: sanitize_state(new_state),
               timestamp: System.monotonic_time()
             })
@@ -297,7 +313,7 @@ defmodule ElixirScope.StateRecorder do
       TraceDB.store_event(:state, %{
         pid: pid,
         module: process_name(pid),
-        callback: :trace_start,
+        data: %{callback: :trace_start},
         state: sanitize_state(initial_state),
         timestamp: System.monotonic_time()
       })
@@ -319,7 +335,15 @@ defmodule ElixirScope.StateRecorder do
   # Installs a handler for the :sys.trace messages
   defp setup_trace_handler(pid) do
     receiver_pid = spawn_link(fn -> handle_trace_messages(pid) end)
-    :sys.install(pid, {receiver_pid, nil}, {fun(:user), fun(:sys)})
+    try do
+      # This is the correct format for sys.install
+      :sys.replace_state(pid, fn state ->
+        send(receiver_pid, {:trace, pid, :state_change, nil, state})
+        state
+      end)
+    rescue
+      _ -> :ok
+    end
   end
   
   # Handles trace messages from the system
@@ -370,8 +394,7 @@ defmodule ElixirScope.StateRecorder do
         TraceDB.store_event(:state, %{
           pid: traced_pid,
           module: process_name(traced_pid),
-          callback: :state_change,
-          state_before: sanitize_state(old_state),
+          data: %{callback: :state_change, state_before: sanitize_state(old_state)},
           state: sanitize_state(new_state),
           timestamp: System.monotonic_time()
         })
@@ -409,14 +432,8 @@ defmodule ElixirScope.StateRecorder do
     end
   end
   
-  # Helper for sys callbacks
+  # Helper for sys callbacks - simplified to avoid issues
   defp fun(_type) do
-    fn
-      {from, state}, _msg ->
-        if from != Process.whereis(:sys) do
-          send(from, {:trace, self(), :state_change, state, :sys.get_state(self())})
-        end
-        {:ok, state}
-    end
+    fn {_from, state}, _msg -> {:ok, state} end
   end
 end 

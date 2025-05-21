@@ -82,7 +82,7 @@ defmodule ElixirScope.StateRecorderTest do
       assert length(events) > 0
       
       # Check that the initial state is recorded
-      init_event = Enum.find(events, fn e -> e.data[:callback] == :init end)
+      init_event = Enum.find(events, fn e -> e.callback == :init end)
       assert init_event != nil
       
       # Clean up
@@ -109,7 +109,7 @@ defmodule ElixirScope.StateRecorderTest do
       assert length(events) > 0
       
       # Check that the state change is recorded
-      call_event = Enum.find(events, fn e -> e.data[:callback] == :handle_call end)
+      call_event = Enum.find(events, fn e -> e.callback == :handle_call end)
       assert call_event != nil
       
       # Clean up
@@ -139,7 +139,7 @@ defmodule ElixirScope.StateRecorderTest do
       assert length(events) > 0
       
       # Check that the state change is recorded
-      cast_event = Enum.find(events, fn e -> e.data[:callback] == :handle_cast end)
+      cast_event = Enum.find(events, fn e -> e.callback == :handle_cast end)
       assert cast_event != nil
       
       # Clean up
@@ -169,7 +169,7 @@ defmodule ElixirScope.StateRecorderTest do
       assert length(events) > 0
       
       # Check that the state change is recorded
-      info_event = Enum.find(events, fn e -> e.data[:callback] == :handle_info end)
+      info_event = Enum.find(events, fn e -> e.callback == :handle_info end)
       assert info_event != nil
       
       # Clean up
