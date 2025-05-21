@@ -434,4 +434,3 @@ defmodule ElixirScope.AIIntegration do
   end
   defp summarize_single_item(item), do: item
 end 
-end 

@@ -131,8 +131,8 @@ defmodule ElixirScope.ProcessObserver do
       |> Enum.filter(fn pid ->
         case Process.info(pid, :dictionary) do
           {:dictionary, dict} -> 
-            dict[:$initial_call] == {:supervisor, :Supervisor, :init} ||
-            dict["$initial_call"] == {:supervisor, :Supervisor, :init}
+            Keyword.get(dict, :"$initial_call") == {:supervisor, :Supervisor, :init} ||
+            Map.get(dict, "$initial_call") == {:supervisor, :Supervisor, :init}
           _ -> false
         end
       end)
@@ -155,8 +155,8 @@ defmodule ElixirScope.ProcessObserver do
         |> Enum.all?(fn linked_pid ->
           case Process.info(linked_pid, :dictionary) do
             {:dictionary, dict} -> 
-              dict[:$initial_call] != {:supervisor, :Supervisor, :init} &&
-              dict["$initial_call"] != {:supervisor, :Supervisor, :init}
+              Keyword.get(dict, :"$initial_call") != {:supervisor, :Supervisor, :init} &&
+              Map.get(dict, "$initial_call") != {:supervisor, :Supervisor, :init}
             _ -> true
           end
         end)
@@ -193,15 +193,19 @@ defmodule ElixirScope.ProcessObserver do
       # Get supervisor information
       case Process.info(supervisor_pid, [:registered_name, :dictionary]) do
         [{:registered_name, name}, {:dictionary, dict}] ->
+          opts = Keyword.get(dict, :"$supervisor_opts", %{})
+          strategy = if is_map(opts), do: Map.get(opts, :strategy), else: Keyword.get(opts, :strategy)
           %{
             name: name,
-            strategy: dict[:"$supervisor_opts"][:strategy],
+            strategy: strategy,
             children: children_map
           }
         [{:dictionary, dict}] ->
+          opts = Keyword.get(dict, :"$supervisor_opts", %{})
+          strategy = if is_map(opts), do: Map.get(opts, :strategy), else: Keyword.get(opts, :strategy)
           %{
             name: nil,
-            strategy: dict[:"$supervisor_opts"][:strategy],
+            strategy: strategy,
             children: children_map
           }
         _ ->

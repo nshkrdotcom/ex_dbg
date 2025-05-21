@@ -223,7 +223,6 @@ defmodule ElixirScope.TraceDB do
   
   # Helper function to determine if an event should be recorded based on sampling
   defp should_record_event?(1.0, _type, _event_data), do: true  # Always record at 100%
-  defp should_record_event?(0.0, _type, _event_data), do: false # Never record at 0%
   defp should_record_event?(sample_rate, type, event_data) do
     # Always record critical events regardless of sample rate:
     # - Process spawn/exit events
@@ -242,24 +241,29 @@ defmodule ElixirScope.TraceDB do
     if critical_event do
       true
     else
-      # Use consistent sampling based on event characteristics to avoid bias
-      # This uses the event's intrinsic properties to determine if it should be sampled
-      seed = 
-        cond do
-          # Use PID and timestamp to get a consistent hash for the event
-          Map.has_key?(event_data, :pid) ->
-            pid_binary = :erlang.term_to_binary(event_data.pid)
-            timestamp = Map.get(event_data, :timestamp, System.monotonic_time())
-            hash_input = pid_binary <> :erlang.term_to_binary(timestamp)
-            :erlang.phash2(hash_input, 1000) / 1000
-            
-          # Fall back to random sampling if no PID is available
-          true ->
-            :rand.uniform()
-        end
-      
-      # Compare the seed with the sample rate
-      seed <= sample_rate
+      # For 0.0 sample rate, never record non-critical events
+      if sample_rate == 0.0 do
+        false
+      else
+        # Use consistent sampling based on event characteristics to avoid bias
+        # This uses the event's intrinsic properties to determine if it should be sampled
+        seed = 
+          cond do
+            # Use PID and timestamp to get a consistent hash for the event
+            Map.has_key?(event_data, :pid) ->
+              pid_binary = :erlang.term_to_binary(event_data.pid)
+              timestamp = Map.get(event_data, :timestamp, System.monotonic_time())
+              hash_input = pid_binary <> :erlang.term_to_binary(timestamp)
+              :erlang.phash2(hash_input, 1000) / 1000
+              
+            # Fall back to random sampling if no PID is available
+            true ->
+              :rand.uniform()
+          end
+        
+        # Compare the seed with the sample rate
+        seed <= sample_rate
+      end
     end
   end
   
@@ -274,6 +278,11 @@ defmodule ElixirScope.TraceDB do
           :ets.tab2list(@events_table)
           |> Enum.map(fn {_, event} -> event end)
           |> Enum.filter(fn event -> event.type == type end)
+        custom_type when is_atom(custom_type) -> 
+          # Support for custom event types
+          :ets.tab2list(@events_table)
+          |> Enum.map(fn {_, event} -> event end)
+          |> Enum.filter(fn event -> event.type == custom_type end)
         nil -> 
           (
             :ets.tab2list(@events_table) ++ 
@@ -481,12 +490,16 @@ defmodule ElixirScope.TraceDB do
       |> Enum.sort_by(& &1.timestamp, :desc)
       |> List.first
       
-    case result do
+    # Debug output for troubleshooting
+    # IO.puts("Looking for state at: #{timestamp}")
+    # IO.puts("Found state: #{inspect(result)}")
+    
+    return_value = case result do
       nil -> {:error, :not_found}
       event -> {:ok, event.state}
     end
     
-    {:reply, result, state}
+    {:reply, return_value, state}
   end
   
   def handle_call(:clear, _from, state) do
