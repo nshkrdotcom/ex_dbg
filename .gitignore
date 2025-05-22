@@ -1,9 +1,9 @@
-/_build
-/cover
-/deps
-/.fetch
+_build/
+cover/
+deps/
+.fetch
 erl_crash.dump
 *.ez
 *.beam
-/config/*.secret.exs
+config/*.secret.exs
 .elixir_ls/
