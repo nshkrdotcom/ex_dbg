@@ -21,7 +21,7 @@ defmodule ElixirSampleApp.MixProject do
   defp deps do
     [
       # Path dependency to ElixirScope
-      {:elixir_scope, path: "../cursor"}
+      {:elixir_scope, path: "../.."}
     ]
   end
 end 

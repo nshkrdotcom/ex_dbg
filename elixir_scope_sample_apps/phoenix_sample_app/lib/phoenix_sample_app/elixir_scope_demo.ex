@@ -6,6 +6,8 @@ defmodule PhoenixSampleApp.ElixirScopeDemo do
   to analyze application behavior, trace processes, and debug issues.
   """
   
+  alias ElixirScope.TraceDB
+  
   @doc """
   Demonstrates how to analyze the Counter module's state changes.
   
@@ -21,7 +23,7 @@ defmodule PhoenixSampleApp.ElixirScopeDemo do
     counter_pid = Process.whereis(PhoenixSampleApp.Counter)
     
     # Get the timeline of state changes
-    state_history = ElixirScope.state_timeline(counter_pid)
+    state_history = get_state_timeline(counter_pid)
     
     # Print out state history
     IO.puts("Counter State History:")
@@ -53,6 +55,11 @@ defmodule PhoenixSampleApp.ElixirScopeDemo do
     :ok
   end
   
+  # Gets the state timeline for a process from TraceDB
+  defp get_state_timeline(pid) do
+    TraceDB.get_state_history(pid)
+  end
+  
   @doc """
   Demonstrates how to trace module function calls.
   
@@ -64,8 +71,23 @@ defmodule PhoenixSampleApp.ElixirScopeDemo do
       iex> PhoenixSampleApp.ElixirScopeDemo.show_counter_function_calls()
   """
   def trace_counter_module do
-    # Start tracing the Counter module
-    ElixirScope.trace_module(PhoenixSampleApp.Counter)
+    # Start the MessageInterceptor if it's not running
+    case Process.whereis(ElixirScope.MessageInterceptor) do
+      nil -> 
+        {:ok, _pid} = ElixirScope.MessageInterceptor.start_link(tracing_level: :full)
+      _ -> 
+        :ok
+    end
+    
+    # Enable message tracing
+    ElixirScope.MessageInterceptor.enable_tracing()
+    
+    # Trace the Counter process
+    counter_pid = Process.whereis(PhoenixSampleApp.Counter)
+    ElixirScope.MessageInterceptor.trace_process(counter_pid)
+    
+    # Start tracing state changes with StateRecorder
+    ElixirScope.StateRecorder.trace_genserver(counter_pid)
     
     IO.puts("Now tracing PhoenixSampleApp.Counter module.")
     IO.puts("Execute some Counter functions, then call show_counter_function_calls/0 to see results.")
@@ -77,17 +99,38 @@ defmodule PhoenixSampleApp.ElixirScopeDemo do
   Shows the function calls made to the Counter module after tracing.
   """
   def show_counter_function_calls do
-    # Query function calls
-    function_calls = ElixirScope.QueryEngine.module_function_calls(PhoenixSampleApp.Counter)
+    # Get the PID of the Counter process
+    counter_pid = Process.whereis(PhoenixSampleApp.Counter)
+    
+    # Query for message events
+    events = TraceDB.query_events(%{
+      type: :message,
+      pid: counter_pid
+    })
     
     IO.puts("Counter Function Calls:")
     IO.puts("---------------------")
     
-    Enum.each(function_calls, fn call ->
-      formatted_time = format_timestamp(call.timestamp)
-      formatted_args = Enum.map_join(call.args, ", ", &inspect/1)
+    Enum.each(events, fn event ->
+      formatted_time = format_timestamp(event.timestamp)
       
-      IO.puts("#{formatted_time}: #{call.function}(#{formatted_args})")
+      # Attempt to extract function name from message
+      function_info = case event.message do
+        {:'$gen_call', _, {:set, value}} ->
+          "set(#{inspect(value)})"
+        {:'$gen_call', _, :get} ->
+          "get()"
+        {:'$gen_cast', _, {:increment, amount}} ->
+          "increment(#{inspect(amount)})"
+        {:'$gen_cast', _, {:decrement, amount}} ->
+          "decrement(#{inspect(amount)})"
+        {:'$gen_cast', _, {:reset, value}} ->
+          "reset(#{inspect(value)})"
+        _ ->
+          "unknown(#{inspect(event.message)})"
+      end
+      
+      IO.puts("#{formatted_time}: #{function_info}")
     end)
     
     :ok
@@ -105,7 +148,7 @@ defmodule PhoenixSampleApp.ElixirScopeDemo do
     counter_pid = Process.whereis(PhoenixSampleApp.Counter)
     
     # Get the timeline of state changes
-    state_history = ElixirScope.state_timeline(counter_pid)
+    state_history = get_state_timeline(counter_pid)
     
     if length(state_history) > 0 do
       # Pick a point in time (the timestamp of a state change)
@@ -114,23 +157,24 @@ defmodule PhoenixSampleApp.ElixirScopeDemo do
       IO.puts("Time-travel debugging to: #{format_timestamp(timestamp)}")
       IO.puts("------------------------------------------------")
       
-      # Get the system snapshot at that time
-      snapshot = ElixirScope.QueryEngine.system_snapshot_at(timestamp)
-      
-      IO.puts("Active processes at that time: #{length(snapshot.active_processes)}")
-      
-      # Show the counter state at that time
-      counter_state = Map.get(snapshot.process_states, counter_pid)
-      IO.puts("Counter state at that time: #{inspect(counter_state)}")
+      # Get events around that time
+      events_around = TraceDB.get_events_at(timestamp, 1000) # 1 second window
       
       # Show events around that time
-      events_around = ElixirScope.TraceDB.get_events_at(timestamp, 1000) # 1 second window
       IO.puts("\nEvents around that time:")
       
       Enum.each(Enum.take(events_around, 5), fn event -> 
         formatted_time = format_timestamp(event.timestamp)
         IO.puts("#{formatted_time}: #{event.type} event")
       end)
+      
+      # Get the state at that time
+      state_at_time = case TraceDB.get_state_at(counter_pid, timestamp) do
+        {:ok, state} -> state
+        {:error, _} -> "Unknown"
+      end
+      
+      IO.puts("\nCounter state at that time: #{inspect(state_at_time)}")
     else
       IO.puts("No state history available. Try operating the counter first.")
     end
@@ -142,32 +186,111 @@ defmodule PhoenixSampleApp.ElixirScopeDemo do
   Demonstrates the supervision tree visualization.
   """
   def show_supervision_tree do
-    tree = ElixirScope.ProcessObserver.get_supervision_tree()
+    # Get all processes
+    processes = Process.list()
+    
+    # Filter to find supervisors - use a more careful approach to identify actual supervisors
+    # Avoid known non-supervisor processes
+    known_non_supervisors = [:logger, :kernel_sup_safe, :application_controller, :erts_trace_cleaner, :socket_registry]
+    
+    supervisors = Enum.filter(processes, fn pid ->
+      # Skip if the process is in the known non-supervisors list
+      case Process.info(pid, :registered_name) do
+        {:registered_name, name} when name in known_non_supervisors -> 
+          false
+        _ ->
+          # Check if it looks like a supervisor
+          case Process.info(pid, [:dictionary]) do
+            [{:dictionary, dictionary}] ->
+              # Check for supervisor module in initial call or behavior
+              is_supervisor =
+                (Keyword.get(dictionary, :"$initial_call") in [
+                  {:supervisor, :supervisor, 1},
+                  {:supervisor, Supervisor, 1}
+                ]) or
+                Enum.any?(dictionary, fn
+                  {:behaviour_modules, modules} -> Supervisor in modules
+                  _ -> false
+                end)
+                
+              if is_supervisor do
+                # Verify it responds to which_children as a final check
+                try do
+                  Supervisor.count_children(pid)
+                  true
+                rescue
+                  _ -> false
+                catch
+                  _, _ -> false
+                end
+              else
+                false
+              end
+            _ -> 
+              false
+          end
+      end
+    end)
     
     IO.puts("Application Supervision Tree:")
     IO.puts("---------------------------")
     
-    Enum.each(tree, fn {pid, sup_info} ->
-      name = sup_info.name || inspect(pid)
-      strategy = sup_info.strategy
+    Enum.each(supervisors, fn pid ->
+      name = case Process.info(pid, :registered_name) do
+        {:registered_name, registered_name} -> registered_name
+        _ -> nil
+      end
       
-      IO.puts("Supervisor: #{name} (Strategy: #{strategy})")
-      Enum.each(sup_info.children, fn {child_pid, child_info} ->
-        child_id = child_info.id || "anonymous"
-        child_type = child_info.type
+      # Safely get children with a timeout to avoid hangs
+      children = safe_get_children(pid)
+      
+      supervisor_name = if name, do: name, else: inspect(pid)
+      
+      IO.puts("Supervisor: #{supervisor_name}")
+      
+      Enum.each(children, fn {child_id, child_pid, child_type, _modules} ->
+        child_name = case Process.info(child_pid, :registered_name) do
+          {:registered_name, registered_name} -> registered_name
+          _ -> inspect(child_pid)
+        end
         
-        IO.puts("  Child: #{child_id} (#{child_type}) - #{inspect(child_pid)}")
+        IO.puts("  Child: #{child_id} (#{child_type}) - #{child_name}")
         
-        if child_type == :supervisor and Map.has_key?(child_info, :children) do
-          Enum.each(child_info.children, fn {grandchild_pid, grandchild_info} ->
-            grandchild_id = grandchild_info.id || "anonymous"
-            IO.puts("    Grandchild: #{grandchild_id} - #{inspect(grandchild_pid)}")
+        # Check if this child is also a supervisor
+        if child_type == :supervisor do
+          # Get grandchildren
+          grandchildren = safe_get_children(child_pid)
+          Enum.each(grandchildren, fn {grandchild_id, grandchild_pid, gc_type, _} ->
+            grandchild_name = case Process.info(grandchild_pid, :registered_name) do
+              {:registered_name, registered_name} -> registered_name
+              _ -> inspect(grandchild_pid)
+            end
+            
+            IO.puts("    Grandchild: #{grandchild_id} (#{gc_type}) - #{grandchild_name}")
           end)
         end
       end)
     end)
     
     :ok
+  end
+  
+  # Get children of a supervisor with a timeout to avoid hanging
+  defp safe_get_children(supervisor_pid) do
+    try do
+      # Use Task.yield_many with a timeout to avoid hangs
+      task = Task.async(fn -> Supervisor.which_children(supervisor_pid) end)
+      case Task.yield(task, 500) do
+        {:ok, result} -> result
+        nil -> 
+          Task.shutdown(task)
+          []
+      end
+    rescue
+      _ -> []
+    catch
+      _, _ -> []
+    end
   end
   
   # Helper functions

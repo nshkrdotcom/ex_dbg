@@ -1,0 +1,11 @@
+{application,elixir_sample_app,
+             [{modules,['Elixir.ElixirSampleApp.Application',
+                        'Elixir.ElixirSampleApp.JobQueue',
+                        'Elixir.ElixirSampleApp.Worker',
+                        'Elixir.ElixirSampleApp.WorkerSupervisor']},
+              {optional_applications,[]},
+              {applications,[kernel,stdlib,elixir,logger,elixir_scope]},
+              {description,"elixir_sample_app"},
+              {registered,[]},
+              {vsn,"0.1.0"},
+              {mod,{'Elixir.ElixirSampleApp.Application',[]}}]}.
