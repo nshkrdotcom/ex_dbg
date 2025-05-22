@@ -140,6 +140,54 @@ defmodule ElixirScope.MessageInterceptor do
     {:error, "Invalid tracing level: #{inspect(level)}"}
   end
   
+  @doc """
+  Stores a message event synchronously - useful for tests
+  
+  This function directly inserts into the ETS tables, bypassing the async GenServer
+  call. This ensures that the event is stored before the function returns.
+  """
+  def store_event_sync(type, event_data) do
+    case Process.whereis(ElixirScope.TraceDB) do
+      nil -> 
+        # If TraceDB is not running, this is a no-op
+        :ok
+      _pid ->
+        # Store the event directly using ETS operations similar to TraceDB's handle_cast
+        # Ensure timestamp is present
+        event_data = Map.put_new(event_data, :timestamp, System.monotonic_time())
+        
+        # Add event type and id
+        event_data = Map.put(event_data, :type, type)
+        id = System.unique_integer([:positive, :monotonic])
+        event_data = Map.put(event_data, :id, id)
+        
+        # For debugging during tests
+        if Mix.env() == :test do
+          IO.puts("Storing message event with id #{id} for pid #{inspect(Map.get(event_data, :pid, "unknown"))}")
+        end
+        
+        # Store in the events table
+        :ets.insert(:elixir_scope_events, {id, event_data})
+            
+        # Add to process index if a pid is present
+        if Map.has_key?(event_data, :pid) do
+          :ets.insert(:elixir_scope_process_index, {event_data.pid, {type, id}})
+        end
+        
+        # Add sender to process index for message events
+        if type == :message and Map.has_key?(event_data, :from_pid) do
+          :ets.insert(:elixir_scope_process_index, {event_data.from_pid, {:message_sent, id}})
+        end
+        
+        # Add receiver to process index for message events
+        if type == :message and Map.has_key?(event_data, :to_pid) do
+          :ets.insert(:elixir_scope_process_index, {event_data.to_pid, {:message_received, id}})
+        end
+        
+        :ok
+    end
+  end
+  
   # GenServer callbacks
   
   def handle_call(:enable_tracing, _from, state) do

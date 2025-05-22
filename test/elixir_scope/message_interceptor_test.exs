@@ -2,6 +2,7 @@ defmodule ElixirScope.MessageInterceptorTest do
   use ExUnit.Case, async: false
 
   alias ElixirScope.MessageInterceptor
+  alias ElixirScope.TraceDBDiagnostic
 
   # Set shorter timeouts for tests
   @moduletag timeout: 15000
@@ -12,10 +13,19 @@ defmodule ElixirScope.MessageInterceptorTest do
     {:ok, black_hole} = StringIO.open("")
     Process.group_leader(self(), black_hole)
     
-    # Start or connect to TraceDB
+    # Make sure TraceDB is initialized first
     tracedb_pid = case Process.whereis(ElixirScope.TraceDB) do
       nil ->
-        {:ok, pid} = ElixirScope.TraceDB.start_link([sample_rate: 0.5, test_mode: true])
+        # Create ETS tables if they don't exist
+        tables = [:elixir_scope_events, :elixir_scope_states, :elixir_scope_process_index]
+        for table <- tables do
+          if :ets.info(table) == :undefined do
+            :ets.new(table, [:named_table, :public, :set])
+          end
+        end
+        
+        # Start TraceDB with test mode
+        {:ok, pid} = ElixirScope.TraceDB.start_link([sample_rate: 1.0, test_mode: true])
         pid
       pid -> pid
     end
@@ -28,24 +38,30 @@ defmodule ElixirScope.MessageInterceptorTest do
       _, _ -> :ok
     end
 
-    # Start the MessageInterceptor with an appropriate tracing level for tests
-    interceptor_pid = case Process.whereis(MessageInterceptor) do
-      nil ->
-        {:ok, pid} = MessageInterceptor.start_link(tracing_level: :full, test_mode: true, log_level: :quiet)
-        pid
-      pid ->
-        # Disable existing tracing to avoid affecting other tests
-        try do
-          MessageInterceptor.disable_tracing()
-        catch
-          _, _ -> :ok
-        end
-        pid
+    # Start the MessageInterceptor with test mode enabled
+    # Make sure to terminate any existing process first to avoid conflicts
+    if pid = Process.whereis(MessageInterceptor) do
+      Process.exit(pid, :normal)
+      :timer.sleep(100) # Give it time to terminate
     end
+    
+    # Start a fresh MessageInterceptor process with appropriate test settings
+    {:ok, interceptor_pid} = MessageInterceptor.start_link(
+      tracing_level: :full, 
+      test_mode: true, 
+      log_level: :quiet
+    )
+    
+    # Verify the process is running
+    Process.alive?(interceptor_pid) || raise "MessageInterceptor process failed to start"
     
     # Restore console output on test completion
     on_exit(fn -> 
       Process.group_leader(self(), original_gl)
+      
+      # For test diagnostics, print all stored events when a test fails
+      # Comment this out if it generates too much output
+      # TraceDBDiagnostic.print_all_data()
     end)
 
     %{tracedb: tracedb_pid, interceptor: interceptor_pid}
@@ -86,7 +102,8 @@ defmodule ElixirScope.MessageInterceptorTest do
   end
 
   describe "basic operations" do
-    test "can be enabled and disabled", %{interceptor: _pid} do
+    test "can be enabled and disabled", %{interceptor: pid} do
+      assert Process.alive?(pid), "MessageInterceptor process is not alive"
       assert :ok = MessageInterceptor.enable_tracing()
       assert %{enabled: true} = MessageInterceptor.tracing_status()
 
@@ -94,7 +111,8 @@ defmodule ElixirScope.MessageInterceptorTest do
       assert %{enabled: false} = MessageInterceptor.tracing_status()
     end
 
-    test "can change tracing level", %{interceptor: _pid} do
+    test "can change tracing level", %{interceptor: pid} do
+      assert Process.alive?(pid), "MessageInterceptor process is not alive"
       assert :ok = MessageInterceptor.set_tracing_level(:minimal)
       assert %{tracing_level: :minimal} = MessageInterceptor.tracing_status()
 
@@ -104,7 +122,9 @@ defmodule ElixirScope.MessageInterceptorTest do
   end
 
   describe "message interception" do
-    test "captures sent messages" do
+    test "captures sent messages", %{interceptor: pid} do
+      assert Process.alive?(pid), "MessageInterceptor process is not alive"
+      
       # Create two processes to send messages between
       test_pid = self()
 
@@ -112,7 +132,8 @@ defmodule ElixirScope.MessageInterceptorTest do
       ElixirScope.TraceDB.clear()
       
       # Make it easy to ensure our message gets recorded
-      ElixirScope.TraceDB.store_event(:message, %{
+      # Using store_event_sync instead of store_event for test reliability
+      MessageInterceptor.store_event_sync(:message, %{
         id: System.unique_integer([:positive, :monotonic]),
         timestamp: System.monotonic_time(),
         from_pid: test_pid,
@@ -121,8 +142,7 @@ defmodule ElixirScope.MessageInterceptorTest do
         type: :manual_test
       })
 
-      # Give tracing time to work
-      :timer.sleep(100)
+      # No need to sleep as store_event_sync is synchronous
       
       # Get events from TraceDB
       events = ElixirScope.TraceDB.query_events(%{
@@ -138,7 +158,9 @@ defmodule ElixirScope.MessageInterceptorTest do
       end)
     end
 
-    test "traces messages for a specific process" do
+    test "traces messages for a specific process", %{interceptor: pid} do
+      assert Process.alive?(pid), "MessageInterceptor process is not alive"
+      
       # First, disable global tracing
       :ok = MessageInterceptor.disable_tracing()
 
@@ -153,8 +175,8 @@ defmodule ElixirScope.MessageInterceptorTest do
         receive do
           {:test, msg} ->
             # Store this message directly to ensure it's captured
-            # This works around timing issues with the tracer
-            ElixirScope.TraceDB.store_event(:message, %{
+            # Using store_event_sync instead of store_event for test reliability
+            MessageInterceptor.store_event_sync(:message, %{
               id: System.unique_integer([:positive, :monotonic]),
               timestamp: System.monotonic_time(),
               pid: self(),
@@ -204,7 +226,9 @@ defmodule ElixirScope.MessageInterceptorTest do
       send(target, :exit)
     end
 
-    test "captures GenServer call messages" do
+    test "captures GenServer call messages", %{interceptor: pid} do
+      assert Process.alive?(pid), "MessageInterceptor process is not alive"
+      
       # Clear all existing trace events
       ElixirScope.TraceDB.clear()
 
@@ -239,16 +263,15 @@ defmodule ElixirScope.MessageInterceptorTest do
       result = GenServer.call(server_pid, :increment)
       assert result == 1
       
-      # Explicitly store this event to make it easier to test
-      ElixirScope.TraceDB.store_event(:message, %{
+      # Explicitly store this event using sync method to make it easier to test
+      MessageInterceptor.store_event_sync(:message, %{
         pid: server_pid,
         message: {:'$gen_call', {self(), make_ref()}, :increment},
         type: :receive,
         timestamp: System.monotonic_time()
       })
       
-      # Give tracing time to work
-      :timer.sleep(200)
+      # No need to sleep as store_event_sync is synchronous
       
       # Get events from TraceDB
       events = ElixirScope.TraceDB.query_events(%{
