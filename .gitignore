@@ -1,4 +1,8 @@
 _build/
+elixir_scope_sample_apps/plain_elixir_sample_app/_build/
+elixir_scope_sample_apps/phoenix_sample_app/_build/
+
+
 cover/
 deps/
 .fetch
