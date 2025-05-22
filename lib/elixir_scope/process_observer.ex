@@ -347,36 +347,113 @@ defmodule ElixirScope.ProcessObserver do
   end
   
   defp find_supervisors do
-    # Try several methods to find supervisors
-    process_dictionary_supervisors = Process.list()
+    # Known processes that are definitely not supervisors
+    known_non_supervisors = [
+      :logger, :kernel_sup_safe, :application_controller, 
+      :erts_trace_cleaner, :socket_registry, :kernel_safe_sup, 
+      :standard_error, :standard_error_sup, :file_server_2,
+      :code_server, :erl_prim_loader, :user, :global_name_server,
+      :inet_db, :pg, :timer_server, :elixir_config, :elixir_sup,
+      :global_group, :init
+    ]
+    
+    # First filter out processes that are definitely not supervisors
+    # before trying potentially expensive which_children calls
+    potential_supervisors = Process.list()
       |> Enum.filter(fn pid ->
         try do
-          case Process.info(pid, :dictionary) do
-            {:dictionary, dict} when is_list(dict) -> 
-              Keyword.get(dict, :"$initial_call") == {:supervisor, :Supervisor, :init}
-            _ -> false
+          # Skip if process is no longer alive
+          case Process.alive?(pid) do
+            false -> false
+            true ->
+              # Skip if process is in known non-supervisors list
+              case Process.info(pid, :registered_name) do
+                {:registered_name, name} -> 
+                  # Use pattern matching condition instead of guard
+                  if name in known_non_supervisors do
+                    false
+                  else
+                    # Check process dictionary for supervisor indicators
+                    case Process.info(pid, :dictionary) do
+                      {:dictionary, dict} when is_list(dict) -> 
+                        # Look for supervisor-specific keys in process dictionary
+                        initial_call = Keyword.get(dict, :"$initial_call")
+                        behaviour_modules = Keyword.get(dict, :behaviour_modules, [])
+                        
+                        supervisor_initial_calls = [
+                          {:supervisor, :supervisor, 1},
+                          {:supervisor, Supervisor, 1},
+                          {:supervisor3, :init, 1}
+                        ]
+                        
+                        cond do
+                          # These are very reliable indicators of supervisors
+                          initial_call in supervisor_initial_calls -> true
+                          Supervisor in behaviour_modules -> true
+                          Keyword.get(dict, :"$ancestors") != nil and 
+                          Keyword.get(dict, :"$children") != nil -> true
+                          true -> false
+                        end
+                      _ -> false
+                    end
+                  end
+                _ -> 
+                  # No registered name
+                  # Still check process dictionary
+                  case Process.info(pid, :dictionary) do
+                    {:dictionary, dict} when is_list(dict) -> 
+                      # Look for supervisor-specific keys in process dictionary
+                      initial_call = Keyword.get(dict, :"$initial_call")
+                      behaviour_modules = Keyword.get(dict, :behaviour_modules, [])
+                      
+                      supervisor_initial_calls = [
+                        {:supervisor, :supervisor, 1},
+                        {:supervisor, Supervisor, 1},
+                        {:supervisor3, :init, 1}
+                      ]
+                      
+                      cond do
+                        # These are very reliable indicators of supervisors
+                        initial_call in supervisor_initial_calls -> true
+                        Supervisor in behaviour_modules -> true
+                        Keyword.get(dict, :"$ancestors") != nil and 
+                        Keyword.get(dict, :"$children") != nil -> true
+                        true -> false
+                      end
+                    _ -> false
+                  end
+              end
           end
         catch
           _, _ -> false
         end
       end)
       
-    # Try supervisor.which_children method for known/named supervisors with a timeout
-    named_supervisors = :erlang.processes()
+    # For the smaller list of potential supervisors, try to validate with count_children
+    # instead of which_children, which is safer and less likely to crash on non-supervisors
+    validated_supervisors = potential_supervisors
       |> Enum.filter(fn pid ->
         try do
-          # Set a timeout using a separate process to avoid hanging the main process
+          # Use Task with a short timeout to avoid hanging
           task = Task.async(fn -> 
             try do
-              :supervisor.which_children(pid)
-              true
+              # count_children is safer than which_children for detection
+              case Supervisor.count_children(pid) do
+                counts when is_map(counts) -> true
+                _ -> false
+              end
             catch
               _, _ -> false
             end
           end)
           
-          # Wait with timeout (100ms should be enough for most supervisors)
-          Task.yield(task, 100) || (Task.shutdown(task) && false)
+          # Wait with a very short timeout
+          case Task.yield(task, 50) do
+            {:ok, result} -> result
+            _ -> 
+              Task.shutdown(task)
+              false
+          end
         rescue
           _ -> false
         catch
@@ -384,9 +461,8 @@ defmodule ElixirScope.ProcessObserver do
         end
       end)
       
-    # Return unique supervisors from both methods
-    # Limit the number of supervisors for efficiency in tests
-    Enum.uniq(process_dictionary_supervisors ++ named_supervisors)
+    # Return unique validated supervisors
+    Enum.uniq(validated_supervisors)
     |> Enum.take(10)  # Limit to 10 supervisors to avoid performance issues in tests
   end
   

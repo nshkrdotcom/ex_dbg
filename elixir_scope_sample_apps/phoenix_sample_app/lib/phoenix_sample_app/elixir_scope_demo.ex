@@ -189,107 +189,164 @@ defmodule PhoenixSampleApp.ElixirScopeDemo do
     # Get all processes
     processes = Process.list()
     
-    # Filter to find supervisors - use a more careful approach to identify actual supervisors
-    # Avoid known non-supervisor processes
-    known_non_supervisors = [:logger, :kernel_sup_safe, :application_controller, :erts_trace_cleaner, :socket_registry]
-    
-    supervisors = Enum.filter(processes, fn pid ->
-      # Skip if the process is in the known non-supervisors list
-      case Process.info(pid, :registered_name) do
-        {:registered_name, name} when name in known_non_supervisors -> 
-          false
-        _ ->
-          # Check if it looks like a supervisor
-          case Process.info(pid, [:dictionary]) do
-            [{:dictionary, dictionary}] ->
-              # Check for supervisor module in initial call or behavior
-              is_supervisor =
-                (Keyword.get(dictionary, :"$initial_call") in [
-                  {:supervisor, :supervisor, 1},
-                  {:supervisor, Supervisor, 1}
-                ]) or
-                Enum.any?(dictionary, fn
-                  {:behaviour_modules, modules} -> Supervisor in modules
-                  _ -> false
-                end)
-                
-              if is_supervisor do
-                # Verify it responds to which_children as a final check
-                try do
-                  Supervisor.count_children(pid)
-                  true
-                rescue
-                  _ -> false
-                catch
-                  _, _ -> false
-                end
-              else
-                false
-              end
-            _ -> 
-              false
-          end
-      end
-    end)
+    # Define process names that are known to not be supervisors
+    known_non_supervisors = [
+      :logger, :kernel_sup_safe, :application_controller, 
+      :erts_trace_cleaner, :socket_registry, :kernel_safe_sup, 
+      :standard_error, :standard_error_sup, :file_server_2,
+      :code_server, :erl_prim_loader, :user, :global_name_server,
+      :inet_db, :pg, :timer_server, :elixir_config, :elixir_sup,
+      :global_group, :init
+    ]
     
     IO.puts("Application Supervision Tree:")
     IO.puts("---------------------------")
     
-    Enum.each(supervisors, fn pid ->
-      name = case Process.info(pid, :registered_name) do
-        {:registered_name, registered_name} -> registered_name
-        _ -> nil
-      end
-      
-      # Safely get children with a timeout to avoid hangs
-      children = safe_get_children(pid)
-      
-      supervisor_name = if name, do: name, else: inspect(pid)
-      
-      IO.puts("Supervisor: #{supervisor_name}")
-      
-      Enum.each(children, fn {child_id, child_pid, child_type, _modules} ->
-        child_name = case Process.info(child_pid, :registered_name) do
-          {:registered_name, registered_name} -> registered_name
-          _ -> inspect(child_pid)
-        end
-        
-        IO.puts("  Child: #{child_id} (#{child_type}) - #{child_name}")
-        
-        # Check if this child is also a supervisor
-        if child_type == :supervisor do
-          # Get grandchildren
-          grandchildren = safe_get_children(child_pid)
-          Enum.each(grandchildren, fn {grandchild_id, grandchild_pid, gc_type, _} ->
-            grandchild_name = case Process.info(grandchild_pid, :registered_name) do
-              {:registered_name, registered_name} -> registered_name
-              _ -> inspect(grandchild_pid)
-            end
-            
-            IO.puts("    Grandchild: #{grandchild_id} (#{gc_type}) - #{grandchild_name}")
-          end)
-        end
-      end)
+    # Find and print top-level supervisors first
+    top_supervisors = Enum.filter(processes, fn pid ->
+      is_likely_supervisor?(pid, known_non_supervisors)
+    end)
+    
+    Enum.each(top_supervisors, fn pid ->
+      print_supervisor_tree(pid, "", known_non_supervisors)
     end)
     
     :ok
   end
   
+  # Determine if a process is likely a supervisor
+  defp is_likely_supervisor?(pid, known_non_supervisors) do
+    # Skip if process no longer exists
+    if !Process.alive?(pid), do: return(false)
+    
+    # Skip if process is in the known non-supervisors list
+    case Process.info(pid, :registered_name) do
+      {:registered_name, name} when name in known_non_supervisors -> 
+        false
+      _ ->
+        # Check for supervisor indicators in process dictionary
+        case Process.info(pid, [:dictionary]) do
+          [{:dictionary, dictionary}] when is_list(dictionary) ->
+            # Look for specific supervisor indicators
+            initial_call = Keyword.get(dictionary, :"$initial_call")
+            behaviour_modules = Keyword.get(dictionary, :behaviour_modules, [])
+            
+            supervisor_initial_calls = [
+              {:supervisor, :supervisor, 1},
+              {:supervisor, Supervisor, 1},
+              {:supervisor3, :init, 1}
+            ]
+            
+            cond do
+              initial_call in supervisor_initial_calls -> true
+              Supervisor in behaviour_modules -> true
+              true ->
+                # Try a safer approach to check if it's a supervisor
+                try_supervisor_check(pid)
+            end
+          _ -> 
+            false
+        end
+    end
+  rescue
+    # Handle any errors during inspection
+    _ -> false
+  catch
+    # Handle any throws during inspection
+    _, _ -> false
+  end
+  
+  # Try to safely check if a process is a supervisor without crashing
+  defp try_supervisor_check(pid) do
+    # Use a combination of checks that won't crash for non-supervisors
+    try do
+      # Use Task with timeout to avoid hanging
+      task = Task.async(fn -> 
+        # Try to get supervisor flags - only works for supervisors
+        # This is safer than which_children for detection
+        case :sys.get_state(pid) do
+          %{flags: _} -> true
+          {_, %{flags: _}} -> true
+          {:state, _, _, %{flags: _}, _} -> true
+          _ -> 
+            # If we can get children without error, it's a supervisor
+            case Supervisor.count_children(pid) do
+              %{} -> true
+              _ -> false
+            end
+        end
+      end)
+      
+      case Task.yield(task, 100) do
+        {:ok, result} -> result
+        _ -> 
+          Task.shutdown(task)
+          false
+      end
+    rescue
+      _ -> false
+    catch
+      _, _ -> false
+    end
+  end
+  
+  # Print a supervisor and its children with indentation
+  defp print_supervisor_tree(pid, indent, known_non_supervisors) do
+    # Skip if process no longer exists
+    if !Process.alive?(pid), do: return(nil)
+    
+    name = case Process.info(pid, :registered_name) do
+      {:registered_name, registered_name} -> registered_name
+      _ -> inspect(pid)
+    end
+    
+    IO.puts("#{indent}Supervisor: #{name}")
+    
+    # Safely get children with a timeout to avoid hangs
+    children = safe_get_children(pid)
+    
+    Enum.each(children, fn 
+      {child_id, child_pid, child_type, _modules} when is_pid(child_pid) and Process.alive?(child_pid) ->
+        child_name = case Process.info(child_pid, :registered_name) do
+          {:registered_name, registered_name} -> registered_name
+          _ -> inspect(child_pid)
+        end
+        
+        IO.puts("#{indent}  Child: #{child_id} (#{child_type}) - #{child_name}")
+        
+        # Recursively print child supervisors
+        if child_type == :supervisor and is_likely_supervisor?(child_pid, known_non_supervisors) do
+          print_supervisor_tree(child_pid, "#{indent}    ", known_non_supervisors)
+        end
+      _ ->
+        # Skip children that are no longer alive or invalid
+        nil
+    end)
+  rescue
+    e -> IO.puts("#{indent}  Error inspecting supervisor #{inspect(pid)}: #{inspect(e)}")
+  catch
+    kind, reason -> IO.puts("#{indent}  Error #{kind} inspecting supervisor #{inspect(pid)}: #{inspect(reason)}")
+  end
+  
   # Get children of a supervisor with a timeout to avoid hanging
   defp safe_get_children(supervisor_pid) do
     try do
-      # Use Task.yield_many with a timeout to avoid hangs
+      # Use Task.yield with a shorter timeout to avoid hangs
       task = Task.async(fn -> Supervisor.which_children(supervisor_pid) end)
-      case Task.yield(task, 500) do
+      case Task.yield(task, 300) do
         {:ok, result} -> result
         nil -> 
           Task.shutdown(task)
           []
       end
     rescue
-      _ -> []
+      e -> 
+        IO.puts("  Error getting children for #{inspect(supervisor_pid)}: #{inspect(e)}")
+        []
     catch
-      _, _ -> []
+      kind, reason -> 
+        IO.puts("  Error #{kind} getting children for #{inspect(supervisor_pid)}: #{inspect(reason)}")
+        []
     end
   end
   
