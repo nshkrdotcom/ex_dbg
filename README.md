@@ -1,18 +1,18 @@
 # ElixirScope
 
-ElixirScope is a state-of-the-art introspection and debugging system for Elixir applications, with special focus on Phoenix web applications. It enables comprehensive tracking of processes, message passing, state changes, and function calls, with AI-assisted analysis capabilities.
+A state-of-the-art introspection and debugging system for Elixir applications, with special focus on Phoenix web applications. It enables comprehensive tracking of processes, message passing, state changes, and function calls, with AI-assisted analysis capabilities.
 
 ## Features
 
--   **Process Monitoring**: Track process lifecycles (spawn, exit), supervision relationships, and inter-process messages.
--   **State Inspection**: Capture and visualize state changes in GenServers and other processes over time.
--   **Function Tracing**: Record function calls and returns for specific modules, including arguments and results.
--   **Phoenix Integration**: Optional tooling to trace Phoenix channels, LiveView, and HTTP requests (requires `PhoenixTracker` component).
--   **AI-Assisted Debugging**: Natural language interface for exploring system behavior through Tidewave integration, leveraging powerful AI for analysis.
--   **Time-Travel Debugging**: Reconstruct application state and execution flow at any point in time using rich query capabilities.
--   **Configurable Tracing**: Fine-tune the level of detail captured, from full tracing to minimal oversight, to balance insight with performance.
--   **Event Sampling**: Reduce performance overhead by recording only a percentage of non-critical events.
--   **Data Persistence**: Optionally persist trace data to disk for later analysis.
+- **Process Monitoring**: Track process lifecycles (spawn, exit), supervision relationships, and inter-process messages.
+- **State Inspection**: Capture and visualize state changes in GenServers and other processes over time.
+- **Function Tracing**: Record function calls and returns for specific modules, including arguments and results.
+- **Phoenix Integration**: Optional tooling to trace Phoenix channels, LiveView, and HTTP requests (requires `PhoenixTracker` component).
+- **AI-Assisted Debugging**: Natural language interface for exploring system behavior through Tidewave integration, leveraging powerful AI for analysis.
+- **Time-Travel Debugging**: Reconstruct application state and execution flow at any point in time using rich query capabilities.
+- **Configurable Tracing**: Fine-tune the level of detail captured, from full tracing to minimal oversight, to balance insight with performance.
+- **Event Sampling**: Reduce performance overhead by recording only a percentage of non-critical events.
+- **Data Persistence**: Optionally persist trace data to disk for later analysis.
 
 ## Installation
 
@@ -107,11 +107,11 @@ ElixirScope.setup(
 
 ### Tracing Levels
 
--   `:full`: Captures all events: function calls, messages, state changes, and process lifecycle.
--   `:messages_only`: Only captures message passing between processes.
--   `:states_only`: Only captures GenServer state changes.
--   `:minimal`: Captures a minimal set of events, primarily for oversight (process creation/termination and major state changes).
--   `:off`: Disables all tracing (still sets up the infrastructure but doesn't start any tracers).
+- `:full`: Captures all events: function calls, messages, state changes, and process lifecycle.
+- `:messages_only`: Only captures message passing between processes.
+- `:states_only`: Only captures GenServer state changes.
+- `:minimal`: Captures a minimal set of events, primarily for oversight (process creation/termination and major state changes).
+- `:off`: Disables all tracing (still sets up the infrastructure but doesn't start any tracers).
 
 ### Sample Rate
 
@@ -120,9 +120,9 @@ The sample rate allows you to reduce the performance impact by only recording a 
 ### TraceDB Configuration Defaults
 
 The underlying `ElixirScope.TraceDB` module has additional configurations that currently use defaults when started via `ElixirScope.setup/1`:
--   `max_events`: Maximum number of events to store (Default: 10,000). Older events are pruned.
--   `persist`: Whether to persist events to disk (Default: `false`).
--   `persist_path`: Path for storing persisted data if `persist` is true (Default: `"./trace_data"`).
+- `max_events`: Maximum number of events to store (Default: 10,000). Older events are pruned.
+- `persist`: Whether to persist events to disk (Default: `false`).
+- `persist_path`: Path for storing persisted data if `persist` is true (Default: `"./trace_data"`).
 
 To customize these, you would need to start `ElixirScope.TraceDB` manually before `ElixirScope.setup/1` or modify `ElixirScope.setup/1` to pass these options through.
 
@@ -148,10 +148,10 @@ end
 ```
 
 When enabled (and with the `ElixirScope.PhoenixTracker` component fully integrated), this can automatically instrument:
--   HTTP request/response cycles
--   LiveView mounts, updates, and events
--   Channel joins and messages
--   PubSub broadcasts
+- HTTP request/response cycles
+- LiveView mounts, updates, and events
+- Channel joins and messages
+- PubSub broadcasts
 
 ## AI Integration with Tidewave
 
@@ -161,50 +161,50 @@ ElixirScope provides a comprehensive integration with Tidewave, allowing natural
 
 When AI integration is enabled, ElixirScope registers the following tools with Tidewave:
 
-1.  **Get State Timeline** (`elixir_scope_get_state_timeline`):
-    -   Description: "Retrieves the history of state changes for a given process."
-    -   Args: `pid_string` (e.g., `"#PID<0.123.0>"`)
-    -   Tracks how process state evolved over time with timestamps.
+1. **Get State Timeline** (`elixir_scope_get_state_timeline`):
+   - Description: "Retrieves the history of state changes for a given process."
+   - Args: `pid_string` (e.g., `"#PID<0.123.0>"`)
+   - Tracks how process state evolved over time with timestamps.
 
-2.  **Get Message Flow** (`elixir_scope_get_message_flow`):
-    -   Description: "Retrieves the message flow between two processes."
-    -   Args: `from_pid` (sender PID string), `to_pid` (receiver PID string)
-    -   Analyzes message exchanges, showing content, timing, and direction.
+2. **Get Message Flow** (`elixir_scope_get_message_flow`):
+   - Description: "Retrieves the message flow between two processes."
+   - Args: `from_pid` (sender PID string), `to_pid` (receiver PID string)
+   - Analyzes message exchanges, showing content, timing, and direction.
 
-3.  **Get Function Calls** (`elixir_scope_get_function_calls`):
-    -   Description: "Retrieves the function calls for a given module."
-    -   Args: `module_name` (e.g., `"MyApp.User"`)
-    -   Gets a chronological list of function calls, including arguments.
+3. **Get Function Calls** (`elixir_scope_get_function_calls`):
+   - Description: "Retrieves the function calls for a given module."
+   - Args: `module_name` (e.g., `"MyApp.User"`)
+   - Gets a chronological list of function calls, including arguments.
 
-4.  **Trace Module** (`elixir_scope_trace_module`):
-    -   Description: "Starts tracing a specific module."
-    -   Args: `module_name` (e.g., `"MyApp.User"`)
-    -   Dynamically captures all function calls and returns for the module.
+4. **Trace Module** (`elixir_scope_trace_module`):
+   - Description: "Starts tracing a specific module."
+   - Args: `module_name` (e.g., `"MyApp.User"`)
+   - Dynamically captures all function calls and returns for the module.
 
-5.  **Trace Process (by PID)** (`elixir_scope_trace_process`):
-    -   Description: "Starts tracing a specific process."
-    -   Args: `pid_string` (e.g., `"#PID<0.123.0>"`)
-    -   Captures messages, state changes, and function calls for the process.
+5. **Trace Process (by PID)** (`elixir_scope_trace_process`):
+   - Description: "Starts tracing a specific process."
+   - Args: `pid_string` (e.g., `"#PID<0.123.0>"`)
+   - Captures messages, state changes, and function calls for the process.
 
-6.  **Trace Named Process** (`elixir_scope_trace_named_process`):
-    -   Description: "Starts tracing a process by its registered name."
-    -   Args: `process_name` (The registered name of the process)
-    -   Similar to tracing by PID, but uses the registered name.
+6. **Trace Named Process** (`elixir_scope_trace_named_process`):
+   - Description: "Starts tracing a process by its registered name."
+   - Args: `process_name` (The registered name of the process)
+   - Similar to tracing by PID, but uses the registered name.
 
-7.  **Get Supervision Tree** (`elixir_scope_get_supervision_tree`):
-    -   Description: "Retrieves the current supervision tree."
-    -   Args: None
-    -   Visualizes the complete supervision hierarchy, supervisor strategies, and child specs.
+7. **Get Supervision Tree** (`elixir_scope_get_supervision_tree`):
+   - Description: "Retrieves the current supervision tree."
+   - Args: None
+   - Visualizes the complete supervision hierarchy, supervisor strategies, and child specs.
 
-8.  **Get Execution Path** (`elixir_scope_get_execution_path`):
-    -   Description: "Retrieves the execution path of a specific process."
-    -   Args: `pid_string` (e.g., `"#PID<0.123.0>"`)
-    -   Follows the sequence of operations for a process.
+8. **Get Execution Path** (`elixir_scope_get_execution_path`):
+   - Description: "Retrieves the execution path of a specific process."
+   - Args: `pid_string` (e.g., `"#PID<0.123.0>"`)
+   - Follows the sequence of operations for a process.
 
-9.  **Analyze State Changes** (`elixir_scope_analyze_state_changes`):
-    -   Description: "Analyzes state changes for a process, including diffs between consecutive states."
-    -   Args: `pid_string` (e.g., `"#PID<0.123.0>"`)
-    -   Provides detailed analysis of state transitions and what triggered them.
+9. **Analyze State Changes** (`elixir_scope_analyze_state_changes`):
+   - Description: "Analyzes state changes for a process, including diffs between consecutive states."
+   - Args: `pid_string` (e.g., `"#PID<0.123.0>"`)
+   - Provides detailed analysis of state transitions and what triggered them.
 
 ### Setup for AI Integration
 
@@ -249,16 +249,60 @@ ElixirScope.setup(ai_integration: true, sample_rate: 0.2)
 
 With this integration, you can ask Tidewave questions like:
 
--   "Show me the state changes for the Counter process (PID '#PID<0.250.0>') over the last 5 minutes."
--   "What messages were exchanged between the UserController (PID '#PID<0.300.0>') and the AuthService (PID '#PID<0.310.0>')?"
--   "When did the AccountManager process (PID '#PID<0.400.0>') crash and what was its state before crashing?"
--   "What function calls were made to the `MyApp.PaymentProcessor` module during the failed transaction?"
--   "Show me the supervision tree for this application."
--   "Analyze state changes for process `MyNamedProcess`."
+- "Show me the state changes for the Counter process (PID '#PID<0.250.0>') over the last 5 minutes."
+- "What messages were exchanged between the UserController (PID '#PID<0.300.0>') and the AuthService (PID '#PID<0.310.0>')?"
+- "When did the AccountManager process (PID '#PID<0.400.0>') crash and what was its state before crashing?"
+- "What function calls were made to the `MyApp.PaymentProcessor` module during the failed transaction?"
+- "Show me the supervision tree for this application."
+- "Analyze state changes for process `MyNamedProcess`."
 
 ### Extending the AI Integration
 
 You can extend the Tidewave integration by adding your own custom tools. This typically involves creating a module that defines functions Tidewave can call and registering them using `Tidewave.Plugin.register_tool/1`. Refer to the `ElixirScope.AIIntegration` module for examples.
+
+## Advanced Usage
+
+### Time-Travel Debugging
+
+```elixir
+# Get state at a specific timestamp
+{:ok, state} = ElixirScope.get_state_at(pid, timestamp)
+
+# Get all events in a time window
+events = ElixirScope.get_events_between(start_time, end_time)
+
+# Reconstruct system state at any point
+snapshot = ElixirScope.system_snapshot_at(timestamp)
+
+# Find events that led to a specific state change
+causes = ElixirScope.analyze_state_change(pid, before_state, after_state)
+```
+
+### Performance Analysis
+
+```elixir
+# Analyze function performance
+hotspots = ElixirScope.performance_analysis(MyApp.SlowModule)
+
+# Message queue analysis
+bottlenecks = ElixirScope.message_queue_analysis()
+
+# Find the slowest operations
+slow_calls = ElixirScope.slowest_function_calls(limit: 10)
+```
+
+### Process Investigation
+
+```elixir
+# Get complete process information
+info = ElixirScope.process_info(pid)
+
+# Find all processes of a specific module
+workers = ElixirScope.find_processes(module: MyApp.Worker)
+
+# Analyze process relationships
+relationships = ElixirScope.process_relationships(pid)
+```
 
 ## Running Tests
 
@@ -267,11 +311,11 @@ ElixirScope includes a comprehensive test suite to ensure its components functio
 ### Test Files Overview
 
 The main test files include:
--   `test/elixir_scope/trace_db_test.exs`: Core storage and querying.
--   `test/elixir_scope/process_observer_test.exs`: Process lifecycle tracking.
--   `test/elixir_scope/state_recorder_test.exs`: GenServer state recording.
--   `test/elixir_scope/message_interceptor_test.exs`: Inter-process message capture.
--   *(Tests for `CodeTracer`, `PhoenixTracker`, `QueryEngine`, and `AIIntegration` would also be part of a complete suite).*
+- `test/elixir_scope/trace_db_test.exs`: Core storage and querying.
+- `test/elixir_scope/process_observer_test.exs`: Process lifecycle tracking.
+- `test/elixir_scope/state_recorder_test.exs`: GenServer state recording.
+- `test/elixir_scope/message_interceptor_test.exs`: Inter-process message capture.
+- *(Tests for `CodeTracer`, `PhoenixTracker`, `QueryEngine`, and `AIIntegration` would also be part of a complete suite).*
 
 ### Running All Tests
 
@@ -326,9 +370,64 @@ mix test --trace
 
 ### Test Environment
 
--   The test suite is configured to use `ElixirScope.TraceDB` in `:test_mode` to ensure consistent behavior and avoid issues with ETS table creation/cleanup.
--   Many tests that involve inter-process communication or system-level tracing are marked with `async: false` to prevent interference between tests.
--   Console output from tracing mechanisms is generally suppressed during tests using `StringIO` or test-specific configurations to keep test output clean.
+- The test suite is configured to use `ElixirScope.TraceDB` in `:test_mode` to ensure consistent behavior and avoid issues with ETS table creation/cleanup.
+- Many tests that involve inter-process communication or system-level tracing are marked with `async: false` to prevent interference between tests.
+- Console output from tracing mechanisms is generally suppressed during tests using `StringIO` or test-specific configurations to keep test output clean.
+
+## Production Considerations
+
+### Performance Impact
+
+ElixirScope is designed to be production-safe when configured appropriately:
+
+```elixir
+# Recommended production settings
+ElixirScope.setup(
+  tracing_level: :minimal,    # Only critical events
+  sample_rate: 0.01,          # 1% sampling
+  storage: :ets,              # Fast in-memory storage
+  max_events: 5_000,          # Limited memory usage
+  persist: false              # No disk I/O overhead
+)
+```
+
+### Memory Management
+
+- **Automatic Pruning**: Oldest events are automatically removed when `max_events` is reached
+- **Sampling**: Non-critical events can be sampled to reduce memory usage
+- **Critical Events**: Process crashes, spawns, and exits are always captured regardless of sampling
+- **Configurable Retention**: Set different retention policies for different event types
+
+### Security Considerations
+
+- **Sensitive Data**: ElixirScope captures actual process state and messages - ensure sensitive data is handled appropriately
+- **Access Control**: Limit access to ElixirScope data in production environments
+- **Data Persistence**: Consider encryption if persisting trace data to disk
+
+## Architecture
+
+### Core Components
+
+- **TraceDB**: ETS-based storage with sophisticated querying capabilities
+- **ProcessObserver**: Monitors process lifecycle and supervision relationships  
+- **MessageInterceptor**: Captures inter-process communication using `:dbg`
+- **StateRecorder**: Tracks GenServer state changes via `__using__` macro or `:sys.trace`
+- **CodeTracer**: Function call tracing with arguments and return values
+- **QueryEngine**: High-level interface for time-travel debugging and analysis
+- **AIIntegration**: Tidewave integration for natural language debugging
+
+### Data Flow
+
+```
+Events → Sampling → Formatting → TraceDB → QueryEngine → AI Analysis
+```
+
+### ETS Storage Structure
+
+ElixirScope uses three main ETS tables:
+- `:elixir_scope_events` - All non-state events (process, message, function)
+- `:elixir_scope_states` - GenServer state snapshots  
+- `:elixir_scope_process_index` - Fast process-based lookups
 
 ## Documentation
 
