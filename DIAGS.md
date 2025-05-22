@@ -4,7 +4,7 @@
 Shows the high-level component relationships, from the main entry point through data collection, storage, and integration layers. Highlights how ElixirScope coordinates between process observation, message interception, state recording, and external integrations.
 
 ```mermaid
-graph TB
+graph LR
     subgraph "Main Entry Point"
         ES[ElixirScope]
     end
@@ -370,7 +370,7 @@ Details the comprehensive AI integration, showing all 9 registered Tidewave tool
 
 
 ```mermaid
-graph TD
+graph LR
     subgraph "AI Integration Module"
         AI[AIIntegration<br/>Main Integration Point]
         SETUP[setup/0<br/>- Check Tidewave availability<br/>- Register tools if available]
@@ -523,7 +523,7 @@ Shows how different tracing levels (:full, :messages_only, :states_only, :minima
 
 
 ```mermaid
-graph TD
+graph LR
     subgraph "Configuration Entry Point"
         SETUP[ElixirScope.setup/1<br/>Configuration Options:<br/>- tracing_level<br/>- sample_rate<br/>- phoenix<br/>- ai_integration<br/>- trace_all]
     end
@@ -687,7 +687,7 @@ graph TD
 Deep dive into the three ETS tables, their structure, data flow during storage and querying, event types, and management operations like cleanup and persistence.
 
 ```mermaid
-graph TB
+graph LR
     subgraph "ETS Tables Structure"
         direction TB
         
