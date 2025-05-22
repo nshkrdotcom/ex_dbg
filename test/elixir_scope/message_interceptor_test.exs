@@ -2,7 +2,7 @@ defmodule ElixirScope.MessageInterceptorTest do
   use ExUnit.Case, async: false
 
   alias ElixirScope.MessageInterceptor
-  alias ElixirScope.TraceDBDiagnostic
+  # alias ElixirScope.TraceDBDiagnostic
 
   # Set shorter timeouts for tests
   @moduletag timeout: 15000
