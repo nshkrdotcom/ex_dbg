@@ -43,7 +43,7 @@ defmodule ElixirScope.MixProject do
     [
       maintainers: ["Your Name"],
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/yourusername/elixir_scope"}
+      links: %{"GitHub" => "https://github.com/nshkrdotcom/elixir_scope"}
     ]
   end
 
@@ -53,4 +53,4 @@ defmodule ElixirScope.MixProject do
       extras: ["README.md", "doc/CURSOR.md"]
     ]
   end
-end 
+end
