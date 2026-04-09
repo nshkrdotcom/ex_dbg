@@ -23,7 +23,7 @@ defmodule ElixirScope.MixProject do
   defp deps do
     [
       {:telemetry, "~> 1.0"},
-      {:ex_doc, "~> 0.27", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.40.0", only: :dev, runtime: false},
       {:phoenix, "~> 1.6", optional: true},
       {:phoenix_live_view, "~> 0.17", optional: true}
     ]
@@ -43,7 +43,8 @@ defmodule ElixirScope.MixProject do
     [
       maintainers: ["Your Name"],
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/nshkrdotcom/elixir_scope"}
+      links: %{"GitHub" => "https://github.com/nshkrdotcom/elixir_scope"},
+      files: ~w(lib mix.exs README.md LICENSE doc)
     ]
   end
 
